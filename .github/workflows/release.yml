@@ -1,0 +1,41 @@
+name: Build extension
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Zip the extension
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          (cd dist && zip -qr "../heroes-of-kamigawa-edhplay-v${VERSION}.zip" .)
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: heroes-of-kamigawa-edhplay-v${{ env.VERSION }}
+          path: heroes-of-kamigawa-edhplay-v${{ env.VERSION }}.zip
+      - name: Attach to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: heroes-of-kamigawa-edhplay-v${{ env.VERSION }}.zip
+          generate_release_notes: true

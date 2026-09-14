@@ -32,7 +32,11 @@ If your commander is not Heroes of Kamigawa, the panel switches to **second deck
 
 In second-deck mode the Kamigawa-specific controls disappear and any Magic set can be opened: pick it from the searchable set list or press **Random pack** for a random set. The card list is fetched from Scryfall once and cached, and card identities are matched to edhplay prints as they are needed. A "Play" booster is rolled with the era-correct size, 14 cards for sets from 2024 on and 15 before, without asking. Sets Scryfall has not yet flagged for boosters fall back to their regular printings. In Heroes mode the panel reminds you that non-Kamigawa packs are a house rule.
 
-## Install (developer mode)
+## Install without developer tools
+
+Download the newest `heroes-of-kamigawa-edhplay-vX.Y.Z.zip` from the GitHub **Releases** page, unzip it into a folder you will keep, then in Chrome open `chrome://extensions`, turn on *Developer mode*, click *Load unpacked* and pick that folder. Step-by-step instructions are in [`docs/INSTALL.md`](docs/INSTALL.md). Every tagged release is built and zipped automatically by GitHub Actions.
+
+## Install from source
 
 ```bash
 npm install
