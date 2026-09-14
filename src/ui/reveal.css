@@ -50,26 +50,26 @@
 @keyframes hok-reveal-pop { from { transform: scale(.6) rotate(-6deg); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes hok-reveal-tear { to { transform: translateY(-70px) rotate(-4deg); opacity: 0; } }
 
-/* Card grid: 5 columns wide, 3 narrow; card width bounded so 3 rows fit the viewport. */
+/* Card grid. The card width is the smaller of the horizontal budget (columns) and the
+   vertical budget (rows), so every card of the pack fits on screen without scrolling:
+   vertical budget = viewport − 230px (padding, header, gaps, buttons) − captions − row gaps. */
 .hok-reveal-grid {
-  --hok-cw: min(150px, 17vw, calc((100vh - 240px) / 3 * .7176));
-  position: relative; display: grid; grid-template-columns: repeat(5, var(--hok-cw)); gap: 12px;
+  --hok-cols: 5; --hok-rows: 3; --hok-gap: 12px; --hok-cap: 200px;
+  --hok-cw: min(
+    var(--hok-cap),
+    calc((100vw - 64px - (var(--hok-cols) - 1) * var(--hok-gap)) / var(--hok-cols)),
+    calc(((100vh - 230px - (var(--hok-rows) - 1) * var(--hok-gap) - var(--hok-rows) * 26px) / var(--hok-rows)) * .7176)
+  );
+  position: relative; display: grid; grid-template-columns: repeat(var(--hok-cols), var(--hok-cw)); gap: var(--hok-gap);
   justify-content: center; align-content: start;
-  max-height: calc(100vh - 200px); overflow: auto; padding: 8px;
+  max-height: calc(100vh - 150px); overflow: auto; padding: 8px;
 }
 /* Wide screens: two rows of eight so each card can be much larger. */
 @media (min-width: 1400px) {
-  .hok-reveal-grid {
-    --hok-cw: min(230px, 11vw, calc((100vh - 230px) / 2 * .7176));
-    grid-template-columns: repeat(8, var(--hok-cw));
-    gap: 16px;
-  }
-}
-@media (min-width: 1000px) and (max-width: 1399px) {
-  .hok-reveal-grid { --hok-cw: min(190px, 15.5vw, calc((100vh - 230px) / 3 * .7176)); }
+  .hok-reveal-grid { --hok-cols: 8; --hok-rows: 2; --hok-gap: 16px; --hok-cap: 240px; }
 }
 @media (max-width: 720px) {
-  .hok-reveal-grid { --hok-cw: min(150px, 28vw); grid-template-columns: repeat(3, var(--hok-cw)); }
+  .hok-reveal-grid { --hok-cols: 4; --hok-rows: 4; --hok-gap: 8px; --hok-cap: 150px; }
 }
 .hok-reveal-empty { grid-column: 1 / -1; color: #9d93b3; padding: 30px; text-align: center; }
 
