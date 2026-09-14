@@ -134,6 +134,14 @@ export function applyMainMessage(msg: MainToIso): void {
     case 'mulligan-choose':
       mulliganChoose.value = { hand: msg.hand, bottom: msg.bottom, mulligans: msg.mulligans };
       break;
+    case 'game-reset':
+      closeReveal();
+      pileView.value = null;
+      mulliganChoose.value = null;
+      offer.value = null;
+      seq.value = null;
+      peers.value = [];
+      break;
     case 'need-set':
     case 'need-prints':
     case 'record':

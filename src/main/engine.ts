@@ -160,7 +160,7 @@ export class Engine {
       }
       this.echo.offer(msg);
       this.afterObservations(observations);
-      if (type === 'new_game_started') this.onNewGame();
+      if (type === 'new_game_started' || type === 'new_game_lobby_started') this.onNewGame();
       if (observations.length) this.scheduleZones();
     }
 
@@ -254,11 +254,20 @@ export class Engine {
   }
 
   private onNewGame(): void {
-    if (!this.state) return;
     this.diag('info', 'new game started; resetting booster state');
-    this.state = emptyGameState(this.state.roomId, this.state.playerId);
+    if (this.state) this.state = emptyGameState(this.state.roomId, this.state.playerId);
+    this.peers = {};
+    this.pendingReveals = [];
+    this.pendingActivate = null;
+    this.lastReplyAt.clear();
+    this.sweepAbort?.abort();
+    this.mulliganAbort?.abort();
+    this.echo.cancelAll('new game');
+    this.sync.clear();
     this.rebuildIndex();
     this.pushState();
+    this.bridge.send({ type: 'peers', peers: [] });
+    this.bridge.send({ type: 'game-reset' });
     this.helloSent = false;
   }
 

@@ -57,6 +57,17 @@
   justify-content: center; align-content: start;
   max-height: calc(100vh - 200px); overflow: auto; padding: 8px;
 }
+/* Wide screens: two rows of eight so each card can be much larger. */
+@media (min-width: 1400px) {
+  .hok-reveal-grid {
+    --hok-cw: min(230px, 11vw, calc((100vh - 230px) / 2 * .7176));
+    grid-template-columns: repeat(8, var(--hok-cw));
+    gap: 16px;
+  }
+}
+@media (min-width: 1000px) and (max-width: 1399px) {
+  .hok-reveal-grid { --hok-cw: min(190px, 15.5vw, calc((100vh - 230px) / 3 * .7176)); }
+}
 @media (max-width: 720px) {
   .hok-reveal-grid { --hok-cw: min(150px, 28vw); grid-template-columns: repeat(3, var(--hok-cw)); }
 }
@@ -64,7 +75,8 @@
 
 /* Card */
 .hok-reveal-card { position: relative; perspective: 800px; transition: transform .15s ease-out; }
-.hok-reveal--revealed .hok-reveal-card:hover { transform: scale(1.06); z-index: 5; }
+.hok-reveal--revealed .hok-reveal-card:hover { transform: scale(1.35); z-index: 5; }
+.hok-reveal--revealed .hok-reveal-card { transition: transform .18s ease-out; }
 .hok-reveal-flip {
   position: relative; aspect-ratio: 488 / 680; border-radius: 4.5% / 3.5%;
   transform-style: preserve-3d; box-shadow: 0 6px 18px rgba(0,0,0,.5);

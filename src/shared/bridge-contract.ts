@@ -58,7 +58,9 @@ export type MainToIso =
   | { type: 'ledger'; entries: LedgerEntry[] }
   | { type: 'diag'; diag: Diag }
   | { type: 'record'; frames: unknown[] }
-  | { type: 'needs-reload' };
+  | { type: 'needs-reload' }
+  /** A new game started in this room: forget everything shown for the previous one. */
+  | { type: 'game-reset' };
 
 export type IsoToMain =
   | { type: 'hello_ack'; nonce: string }
