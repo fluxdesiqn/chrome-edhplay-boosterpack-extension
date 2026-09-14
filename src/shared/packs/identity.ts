@@ -4,31 +4,22 @@
  */
 import type { CardIdentity } from '@shared/protocol';
 import { SET_DATA } from './data';
-import { SET_CODES, SET_NAMES, parseRef, type CardRef, type PackCard, type Rarity, type SetCode } from './types';
+import { type AnySetData, _resetRegistryIndexes, cardByCn, getSetData } from './registry';
+import { type CardRef, type PackCard, type Rarity, SET_CODES, type SetCode, parseRef, setName } from './types';
 
-const indexCache = new Map<SetCode, Map<string, PackCard>>();
-
-function indexFor(set: SetCode): Map<string, PackCard> {
-  let idx = indexCache.get(set);
-  if (!idx) {
-    idx = new Map();
-    const data = SET_DATA[set];
-    for (const c of data.cards) idx.set(c.cn, c);
-    for (const c of data.basics ?? []) if (!idx.has(c.cn)) idx.set(c.cn, c);
-    for (const c of data.variants ?? []) if (!idx.has(c.cn)) idx.set(c.cn, c);
-    indexCache.set(set, idx);
-  }
-  return idx;
-}
-
+/**
+ * Card behind a ref, from bundled data or a registered runtime set (see
+ * registry.ts). Null for unknown sets, unknown collector numbers and bad refs.
+ */
 export function findCard(ref: CardRef | string): PackCard | null {
   const parsed = parseRef(ref);
   if (!parsed) return null;
-  return indexFor(parsed.set).get(parsed.cn) ?? null;
+  return cardByCn(parsed.set, parsed.cn);
 }
 
+/** Booster-eligible non-basic cards of a set (empty when no data is known). */
 export function cardsInSet(set: SetCode): PackCard[] {
-  return SET_DATA[set].cards;
+  return getSetData(set)?.cards ?? [];
 }
 
 /**
@@ -59,6 +50,12 @@ export function scryfallImage(id: string, face: 'front' | 'back'): string {
   return `https://cards.scryfall.io/normal/${face}/${id[0]}/${id[1]}/${id}.jpg`;
 }
 
+/**
+ * Identity overlay for a card. Bundled cards (and runtime cards once
+ * `registerPrints` filled their `ep`/`ec`) carry real edhplay ids; a runtime
+ * card that is not resolved yet gets the synthetic `hok-<scryfallId>` /
+ * `hok-card-<scryfallId>` pair.
+ */
 export function identityFor(ref: CardRef | string): CardIdentity | null {
   const parsed = parseRef(ref);
   const card = findCard(ref);
@@ -74,7 +71,7 @@ export function identityFor(ref: CardRef | string): CardIdentity | null {
     power: card.p ?? null,
     toughness: card.q ?? null,
     rarity: RARITY_WORD[card.r],
-    set_name: SET_NAMES[parsed.set],
+    set_name: setName(parsed.set),
   };
   if (card.mana_cost !== undefined) identity.mana_cost = card.mana_cost;
   if (card.cmc !== undefined) identity.cmc = card.cmc;
@@ -83,11 +80,32 @@ export function identityFor(ref: CardRef | string): CardIdentity | null {
 }
 
 let nameSet: Set<string> | null = null;
+const setNameCache = new WeakMap<AnySetData, Set<string>>();
 
-/** Test hook: drop the lazily built per-set indexes and the name set. */
+/** Test hook: drop the lazily built per-set indexes and the name sets. */
 export function _resetIdentityCaches(): void {
-  indexCache.clear();
+  _resetRegistryIndexes();
   nameSet = null;
+}
+
+function namesOf(data: AnySetData): Set<string> {
+  let names = setNameCache.get(data);
+  if (!names) {
+    names = new Set();
+    for (const c of [...data.cards, ...(data.basics ?? [])]) {
+      names.add(c.name);
+      const front = c.name.split(' // ')[0];
+      if (front) names.add(front);
+    }
+    setNameCache.set(data, names);
+  }
+  return names;
+}
+
+/** True when `name` is the full or front-face name of a card in `set` (false when the set has no data). */
+export function isNameInSet(set: SetCode, name: string): boolean {
+  const data = getSetData(set);
+  return data ? namesOf(data).has(name) : false;
 }
 
 /** True when `name` is the full or front-face name of any card in the four Kamigawa sets. */

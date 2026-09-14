@@ -1,7 +1,8 @@
 /** UI-side state, fed by bridge messages from the MAIN-world engine. */
 import { signal, computed } from '@preact/signals';
 import type { Diag, MainToIso, OfferCard, SocketCtx } from '@shared/bridge-contract';
-import type { RolledPackRecord } from '@shared/state';
+import type { CardSummary, RolledPackRecord } from '@shared/state';
+import type { SetSummary } from '@shared/packs/runtime';
 import type { Activation, Config, GamePhase, HokGameState, LedgerEntry, PeerView } from '@shared/state';
 import { defaultConfig, emptyPhase } from '@shared/state';
 import type { ZoneSnapshot } from '@shared/bridge-contract';
@@ -19,6 +20,17 @@ export const needsReload = signal(false);
 export const config = signal<Config>(defaultConfig);
 export const readOnly = signal(false);
 export const bridgeReady = signal(false);
+
+/** Runtime set list for the pack chooser (loaded on demand by the content script). */
+export const setList = signal<SetSummary[] | null>(null);
+export const setListError = signal<string | undefined>(undefined);
+export const setListLoader: { load: (() => void) | null } = { load: null };
+export function requestSetList(): void {
+  if (setList.value === null) setListLoader.load?.();
+}
+
+export const pileView = signal<{ kind: 'peek' | 'search'; cards: OfferCard[]; total: number } | null>(null);
+export const mulliganChoose = signal<{ hand: CardSummary[]; bottom: number; mulligans: number } | null>(null);
 
 export type RevealPhase = 'opening' | 'revealed' | 'shuffling' | 'closed';
 export interface RevealState {
@@ -91,7 +103,11 @@ export function applyMainMessage(msg: MainToIso): void {
       break;
     case 'reveal': {
       const same = reveal.value && reveal.value.ownerId === msg.ownerId && reveal.value.pack.n === msg.pack.n;
-      if (same) break;
+      if (same) {
+        // identities refreshed (e.g. print ids resolved): keep the phase, update the cards
+        reveal.value = { ...reveal.value!, cards: msg.cards };
+        break;
+      }
       reveal.value = { ownerId: msg.ownerId, ownerName: msg.ownerName, isOwner: msg.isOwner, pack: msg.pack, cards: msg.cards, phase: 'opening' };
       setRevealPhase('opening', () => setRevealPhase('revealed'));
       break;
@@ -112,6 +128,14 @@ export function applyMainMessage(msg: MainToIso): void {
     case 'needs-reload':
       needsReload.value = true;
       break;
+    case 'pile-view':
+      pileView.value = { kind: msg.kind, cards: msg.cards, total: msg.total };
+      break;
+    case 'mulligan-choose':
+      mulliganChoose.value = { hand: msg.hand, bottom: msg.bottom, mulligans: msg.mulligans };
+      break;
+    case 'need-set':
+    case 'need-prints':
     case 'record':
     case 'hello':
       break;

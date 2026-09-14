@@ -1,4 +1,4 @@
-import { PACK_KINDS, SET_CODES, parseRef } from '../packs/types';
+import { PACK_KINDS, isValidSetCode, parseRef } from '../packs/types';
 import type { CardRef, PackKind, SetCode } from '../packs/types';
 import {
   SYNC_MAX_CHARS,
@@ -120,7 +120,7 @@ function validateSync(raw: unknown): SyncMessage | null {
     case 'pack': {
       const { n, set, seed, dv, k, c, f } = raw;
       if (!isFiniteNumber(n) || !isString(seed) || !isString(dv)) return null;
-      if (!isString(set) || !(SET_CODES as readonly string[]).includes(set)) return null;
+      if (!isString(set) || !isValidSetCode(set)) return null;
       const out: Extract<SyncMessage, { t: 'pack' }> = { t: 'pack', n, set: set as SetCode, seed, dv };
       if (k !== undefined) {
         if (!isString(k) || !(PACK_KINDS as readonly string[]).includes(k)) return null;

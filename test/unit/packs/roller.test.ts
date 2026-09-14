@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DATA_VERSION, SET_DATA } from '@shared/packs/data';
 import { PACK_SIZE, poolsFor, rollPack, rollPackOfKind, shuffleIntoPile, TEMPLATES, verifyPack } from '@shared/packs/roller';
-import { makeRef, parseRef, SET_CODES, type CardRef, type PackCard, type SetCode } from '@shared/packs/types';
+import { makeRef, parseRef, SET_CODES, type BundledSet, type CardRef, type PackCard } from '@shared/packs/types';
 
 const seedOf = (i: number): string => i.toString(16).padStart(16, '0');
 
-function cardOf(set: SetCode, ref: CardRef): PackCard {
+function cardOf(set: BundledSet, ref: CardRef): PackCard {
   const { cn } = parseRef(ref)!;
   const data = SET_DATA[set];
   return (data.cards.find((c) => c.cn === cn) ?? data.basics?.find((c) => c.cn === cn)) as PackCard;
@@ -141,7 +141,7 @@ describe('roller', () => {
   // packs rolled by older clients will no longer verify: bump DATA_VERSION knowingly.
   // These predate the Set/Collector rollers and must never move: the draft draw stream is frozen.
   it('golden snapshots', () => {
-    const GOLDEN: Record<SetCode, Record<string, string[]>> = {
+    const GOLDEN: Record<BundledSet, Record<string, string[]>> = {
       chk: {
         '0000000000000001': ['chk:41', 'chk:93', 'chk:119', 'chk:63', 'chk:161', 'chk:191', 'chk:84', 'chk:68', 'chk:130', 'chk:53', 'chk:20', 'chk:55', 'chk:227', 'chk:199', 'chk:96'],
         '0123456789abcdef': ['chk:180', 'chk:93', 'chk:113', 'chk:36', 'chk:55', 'chk:225', 'chk:234', 'chk:32', 'chk:27', 'chk:168', 'chk:218', 'chk:68', 'chk:38', 'chk:224', 'chk:96'],

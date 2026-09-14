@@ -127,7 +127,9 @@ describe('identity', () => {
     }
     expect(parseRef('bad')).toBeNull();
     expect(parseRef(':1')).toBeNull();
-    expect(parseRef('zzz:1')).toBeNull();
+    // any well-formed set code parses now (runtime sets); data lookup decides whether it resolves
+    expect(parseRef('zzz:1')).toEqual({ set: 'zzz', cn: '1' });
+    expect(findCard('zzz:1')).toBeNull();
     expect(parseRef('neo:')).toBeNull();
   });
 });

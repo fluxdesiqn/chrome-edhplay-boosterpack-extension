@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { IsoToMain } from '@shared/bridge-contract';
-import { AVAILABLE_PACKS, PACK_KIND_NAMES, SET_CODES, SET_NAMES, packLabel, type PackKind, type SetCode } from '@shared/packs/types';
-import { config, diags, ledger, needsReload, offer, peers, phase, readOnly, screen, seq, socket, state, zones } from './machine';
+import { SET_CODES, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
+import { config, diags, ledger, mulliganChoose, needsReload, offer, peers, phase, pileView, readOnly, requestSetList, screen, seq, setList, setListError, setListLoader, socket, state, zones } from './machine';
+import { SetPicker } from './panels/SetPicker';
+import { PileView } from './panels/PileView';
+import { MulliganChooser } from './panels/MulliganChooser';
 
 export interface PanelProps {
   send: (msg: IsoToMain) => void;
@@ -100,6 +103,42 @@ function GameTab({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: P
     );
   }
 
+  const pv = pileView.value;
+  const mc = mulliganChoose.value;
+  if (mc) {
+    return (
+      <div>
+        <PhaseLine />
+        <MulliganChooser
+          hand={mc.hand}
+          bottom={mc.bottom}
+          mulligans={mc.mulligans}
+          freeFirst={config.value.freeFirstMulligan}
+          busy={seq.value?.seq === 'mulligan' && !seq.value.done && !seq.value.error}
+          onConfirm={(ids) => {
+            mulliganChoose.value = null;
+            send({ type: 'cmd', cmd: 'mulligan-bottom', ids });
+          }}
+          onMulliganAgain={() => {
+            mulliganChoose.value = null;
+            send({ type: 'cmd', cmd: 'mulligan' });
+          }}
+        />
+      </div>
+    );
+  }
+  if (pv) {
+    return (
+      <PileView
+        kind={pv.kind}
+        cards={pv.cards}
+        total={pv.total}
+        onTake={pv.kind === 'search' ? (ref, zone) => { pileView.value = null; send({ type: 'cmd', cmd: 'pile-take', ref, zone }); } : undefined}
+        onClose={() => { pileView.value = null; send({ type: 'cmd', cmd: 'pile-view-close' }); }}
+      />
+    );
+  }
+
   return (
     <div>
       <PhaseLine />
@@ -120,22 +159,27 @@ function DeckCheck({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig:
     <div class="hok-section">
       <p class="hok-h">Deck check</p>
       {!p.deckSubmitted && <div class="hok-note">Submit your deck first. It must contain {config.value.minBlankCopies} copies of one basic land (Wastes by default) and the room must be Free Commander.</div>}
-      {p.deckSubmitted && (
+      {p.deckSubmitted && p.mulliganActive && !p.decisionMade && (
+        <div class="hok-note">
+          <b>Keep your opening hand in edhplay first</b> (do not mulligan there; edhplay blocks library actions until you decide). The sweep {config.value.autoSweep ? 'starts automatically' : 'can run'} right after your keep, and you can mulligan from this panel afterwards with Commander rules.
+          {basics > 0 && <div>Blanks in your hand now: {basics}. They are swept away and replaced.</div>}
+        </div>
+      )}
+      {p.deckSubmitted && (p.decisionMade || !p.mulliganActive) && (
         <div class="hok-note warn">
           {reason ?? 'Placeholder not detected yet. The sweep will scan your library when you start it.'}
-          {basics > 0 && <div>Basic lands in hand: {basics}</div>}
         </div>
       )}
       <div class="hok-row">
         <span class="hok-muted">Placeholder</span>
         <span>{st?.placeholderName ?? config.value.preferredPlaceholderName}</span>
       </div>
-      <button class="hok-btn block" disabled={!p.deckSubmitted} onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
+      <button class="hok-btn block" disabled={!p.deckSubmitted || (p.mulliganActive && !p.decisionMade)} onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
         Scan library and sweep blanks
       </button>
       <label class="hok-check">
         <input type="checkbox" checked={config.value.autoSweep} onChange={(e) => onConfig({ autoSweep: (e.target as HTMLInputElement).checked })} />
-        Sweep automatically when the mulligan phase starts
+        Sweep automatically after I keep my hand
       </label>
     </div>
   );
@@ -156,9 +200,9 @@ function Sweep({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: Pan
     <div class="hok-section">
       <p class="hok-h">Sweep blanks</p>
       <div class="hok-note">
-        Moves every {st.placeholderName ?? 'placeholder'} out of your library and hand into a face-down exile pile, then refills your hand. Run it <b>before</b> you keep or mulligan.
+        Moves every {st.placeholderName ?? 'placeholder'} out of your library and hand into a face-down exile pile, then refills your hand. Runs after you keep in edhplay; mulligan from this panel afterwards.
       </div>
-      {!p.mulliganActive && p.decisionMade && <div class="hok-note warn">You already kept your hand. Sweeping now still works, but blanks drawn later stay in your hand until you exile them.</div>}
+      {p.mulliganActive && !p.decisionMade && <div class="hok-note warn">Keep your hand in edhplay first. edhplay blocks library actions until your mulligan decision is made.</div>}
       {running && s?.seq === 'sweep' && (
         <div>
           <div class="hok-muted">{s.step}</div>
@@ -167,14 +211,14 @@ function Sweep({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: Pan
       )}
       {st.sweep.error && <div class="hok-note err">{st.sweep.error}</div>}
       <div class="hok-row">
-        <button class="hok-btn" disabled={running} onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
+        <button class="hok-btn" disabled={running || (p.mulliganActive && !p.decisionMade)} onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
           {st.sweep.phase === 'failed' ? 'Retry sweep' : 'Sweep now'}
         </button>
         {running && <button class="hok-btn secondary sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel</button>}
       </div>
       <label class="hok-check">
         <input type="checkbox" checked={config.value.autoSweep} onChange={(e) => onConfig({ autoSweep: (e.target as HTMLInputElement).checked })} />
-        Sweep automatically next time
+        Sweep automatically after I keep my hand
       </label>
     </div>
   );
@@ -182,30 +226,68 @@ function Sweep({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: Pan
 
 function Ready({ send, st }: { send: (m: IsoToMain) => void; st: NonNullable<typeof state.value> }) {
   const p = phase.value;
+  const deck = st.mode === 'deck';
+  const [peek, setPeek] = useState(3);
   const kamiInGy = (zones.value?.cards ?? []).filter(
-    (c) => c.ownerId === st.playerId && c.zone === 'graveyard' && (st.mappings[c.id] || /Kamigawa/i.test(c.type_line)) && /Creature/.test(c.type_line),
+    (c) => c.ownerId === st.playerId && c.zone === 'graveyard' && st.mappings[c.id] && /Creature/.test(c.type_line),
   );
   return (
     <div>
       <div class="hok-section">
+        <div class="hok-row">
+          <span class="hok-muted">Mode</span>
+          <span>
+            <button class={`hok-pillbtn ${st.mode === 'heroes' ? 'selected' : ''}`} title="Heroes of Kamigawa: +2 looks at four, keeps two" onClick={() => send({ type: 'cmd', cmd: 'set-mode', mode: st.modeForced && st.mode === 'heroes' ? 'auto' : 'heroes' })}>Heroes</button>{' '}
+            <button class={`hok-pillbtn ${st.mode === 'deck' ? 'selected' : ''}`} title="Booster pile as a hidden second deck" onClick={() => send({ type: 'cmd', cmd: 'set-mode', mode: st.modeForced && st.mode === 'deck' ? 'auto' : 'deck' })}>Second deck</button>
+          </span>
+        </div>
         <div class="hok-row"><span class="hok-muted">Booster pile</span><b>{st.pile.length} cards</b></div>
         <div class="hok-row"><span class="hok-muted">Blanks left</span><b>{st.reservoir.length}</b></div>
         <div class="hok-row"><span class="hok-muted">Packs opened</span><b>{st.packs.length}</b></div>
-        <div class="hok-row"><span class="hok-muted">+2 activations</span><b>{st.activationCount}</b></div>
+        {!deck && <div class="hok-row"><span class="hok-muted">+2 activations</span><b>{st.activationCount}</b></div>}
       </div>
-      <div class="hok-section">
-        {!p.isMyTurn && !p.mulliganActive && <div class="hok-note warn">Not your turn. Planeswalker abilities are sorcery speed; activate during your main phase.</div>}
-        <button class="hok-btn block" disabled={st.reservoir.length === 0 && st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'begin' })}>
-          +2: Choose a pack to open
-        </button>
-        <div style={{ height: 6 }} />
-        <button class="hok-btn secondary block sm" disabled={st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>
-          +2 without opening a pack (look at four)
-        </button>
-      </div>
+
+      <MulliganSection send={send} st={st} />
+
+      {!deck && (
+        <div class="hok-section">
+          {!p.isMyTurn && !p.mulliganActive && <div class="hok-note warn">Not your turn. Planeswalker abilities are sorcery speed; activate during your main phase.</div>}
+          <button class="hok-btn block" disabled={st.reservoir.length === 0 && st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'begin' })}>
+            +2: Choose a pack to open
+          </button>
+          <div style={{ height: 6 }} />
+          <button class="hok-btn secondary block sm" disabled={st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>
+            +2 without opening a pack (look at four)
+          </button>
+        </div>
+      )}
+
+      {deck && (
+        <div class="hok-section">
+          <p class="hok-h">Second deck</p>
+          <button class="hok-btn block" onClick={() => send({ type: 'cmd', cmd: 'begin' })}>Open a pack into the pile</button>
+          <div style={{ height: 6 }} />
+          <div class="hok-row">
+            <button class="hok-btn secondary sm" disabled={st.pile.length === 0 || st.reservoir.length === 0} onClick={() => send({ type: 'cmd', cmd: 'pile-draw', count: 1 })}>Draw top card</button>
+            <button class="hok-btn secondary sm" disabled={st.pile.length === 0 || st.reservoir.length === 0} onClick={() => send({ type: 'cmd', cmd: 'pile-mill', count: 1 })}>Mill top card</button>
+          </div>
+          <div style={{ height: 6 }} />
+          <div class="hok-row">
+            <span>
+              <button class="hok-btn secondary sm" disabled={st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'pile-peek', count: peek })}>Look at top</button>{' '}
+              <input class="hok-input" style={{ width: 44 }} type="number" min={1} max={Math.max(1, st.pile.length)} value={peek} onInput={(e) => setPeek(Math.max(1, Number((e.target as HTMLInputElement).value) || 1))} />
+            </span>
+            <button class="hok-btn secondary sm" disabled={st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'pile-search' })}>Search pile</button>
+          </div>
+          <div style={{ height: 6 }} />
+          <button class="hok-btn secondary block sm" disabled={st.pile.length < 2} onClick={() => send({ type: 'cmd', cmd: 'pile-shuffle' })}>Shuffle pile</button>
+          <div class="hok-muted" style={{ marginTop: 6 }}>Other players see the pile size, and each card the moment it becomes public.</div>
+        </div>
+      )}
+
       {kamiInGy.length > 0 && (
         <div class="hok-section">
-          <p class="hok-h">−3 targets in graveyard</p>
+          <p class="hok-h">{deck ? 'Pile creatures in graveyard' : '−3 targets in graveyard'}</p>
           <ul class="hok-list">
             {kamiInGy.map((c) => (
               <li><span>{c.name}</span><span class="hok-muted">drag to battlefield</span></li>
@@ -219,6 +301,29 @@ function Ready({ send, st }: { send: (m: IsoToMain) => void; st: NonNullable<typ
           <button class="hok-btn secondary sm" onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>Sweep stragglers</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function MulliganSection({ send, st }: { send: (m: IsoToMain) => void; st: NonNullable<typeof state.value> }) {
+  const s = seq.value;
+  const p = phase.value;
+  const running = s?.seq === 'mulligan' && !s.done && !s.error;
+  const next = st.mulligans + 1;
+  const bottom = config.value.freeFirstMulligan ? Math.max(0, next - 1) : next;
+  if (p.turnSeq > 1 && st.mulligans === 0 && !p.mulliganActive) return null; // game underway, no point offering
+  return (
+    <div class="hok-section">
+      <p class="hok-h">Mulligan (Commander rules)</p>
+      <div class="hok-muted">
+        {st.mulligans === 0 ? 'Not happy with your hand? ' : `Mulligans taken: ${st.mulligans}. `}
+        Next mulligan: draw {config.value.handSize}{bottom > 0 ? `, then put ${bottom} on the bottom` : ' (free)'}.
+      </div>
+      {running && <div class="hok-muted">{s?.step}</div>}
+      {s?.seq === 'mulligan' && s.error && <div class="hok-note err">{s.error}</div>}
+      <button class="hok-btn secondary block sm" disabled={running} onClick={() => send({ type: 'cmd', cmd: 'mulligan' })}>
+        Mulligan {next}
+      </button>
     </div>
   );
 }
@@ -254,7 +359,7 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
     return (
       <div class="hok-section">
         <p class="hok-h">
-          {a.pack ? `Pack ${a.pack.n} (${SET_NAMES[a.pack.set]}) shuffled in. ` : ''}Top {a.look.length} of your booster pile — pick {need} for your hand
+          {a.pack ? `Pack ${a.pack.n} (${setName(a.pack.set)}) shuffled in. ` : ''}Top {a.look.length} of your booster pile — pick {need} for your hand
         </p>
         {short && (
           <div class="hok-note err">
@@ -288,7 +393,7 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
     const done = a.moves.filter((m) => m.done).length;
     return (
       <div class="hok-section">
-        <p class="hok-h">Resolving</p>
+        <p class="hok-h">{a.op === 'draw' ? 'Drawing from the booster pile' : a.op === 'mill' ? 'Milling from the booster pile' : a.op === 'search' ? 'Taking from the booster pile' : 'Resolving'}</p>
         <div class="hok-muted">{s?.step ?? 'Moving cards…'}</div>
         <div class="hok-progress"><div style={{ width: `${a.moves.length ? Math.round((done / a.moves.length) * 100) : 10}%` }} /></div>
         {s?.error && (
@@ -312,32 +417,37 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
 }
 
 function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
+  const st = state.value!;
   const [set, setSet] = useState<SetCode>(config.value.defaultSet);
   const [kind, setKind] = useState<PackKind>('draft');
-  const kinds = AVAILABLE_PACKS[set];
-  const effectiveKind: PackKind = kinds.includes(kind) ? kind : 'draft';
+  useEffect(() => requestSetList(), []);
+  const loading = seq.value?.seq === 'activate' && /Loading/.test(seq.value.step) && !seq.value.error;
   return (
     <div class="hok-section">
-      <p class="hok-h">Open up to one sealed Kamigawa booster</p>
-      <div class="hok-sets">
-        {SET_CODES.map((code: SetCode) => (
-          <button class={`hok-btn secondary ${set === code ? 'selected' : ''}`} onClick={() => setSet(code)}>{SET_NAMES[code]}</button>
-        ))}
-      </div>
+      <p class="hok-h">{st.mode === 'deck' ? 'Open a booster into your second deck' : 'Open up to one sealed booster'}</p>
+      <SetPicker
+        sets={setList.value}
+        recent={config.value.recentSets}
+        value={set}
+        kind={kind}
+        onChange={(s2, k) => { setSet(s2); setKind(k); }}
+        onRefresh={() => { setList.value = null; setListLoader.load?.(); }}
+        error={setListError.value}
+      />
+      {st.mode === 'heroes' && !SET_CODES.includes(set as never) && (
+        <div class="hok-note warn">Heroes of Kamigawa says "Kamigawa booster pack". Opening {setName(set)} is a house rule; make sure your pod agrees.</div>
+      )}
+      {seq.value?.seq === 'activate' && seq.value.error && <div class="hok-note err">{seq.value.error}</div>}
       <div style={{ height: 8 }} />
-      <div class="hok-kinds">
-        {(['draft', 'set', 'collector'] as PackKind[]).map((k) => (
-          <button class={`hok-pillbtn ${effectiveKind === k ? 'selected' : ''}`} disabled={!kinds.includes(k)} title={kinds.includes(k) ? '' : `${SET_NAMES[set]} was not sold as ${PACK_KIND_NAMES[k]}s`} onClick={() => setKind(k)}>
-            {PACK_KIND_NAMES[k]}
-          </button>
-        ))}
-      </div>
-      <div style={{ height: 8 }} />
-      <button class="hok-btn block" onClick={() => send({ type: 'cmd', cmd: 'activate', set, kind: effectiveKind })}>
-        Open {packLabel(set, effectiveKind)}
+      <button class="hok-btn block" disabled={loading} onClick={() => send({ type: 'cmd', cmd: 'activate', set, kind })}>
+        {loading ? 'Loading card list…' : `Open ${packLabel(set, kind)}`}
       </button>
-      <div style={{ height: 6 }} />
-      <button class="hok-btn secondary block sm" onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>No pack, just look at the pile</button>
+      {st.mode === 'heroes' && (
+        <div>
+          <div style={{ height: 6 }} />
+          <button class="hok-btn secondary block sm" onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>No pack, just look at the pile</button>
+        </div>
+      )}
       <div style={{ height: 6 }} />
       <button class="hok-btn danger block sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel</button>
     </div>

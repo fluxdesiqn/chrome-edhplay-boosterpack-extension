@@ -63,7 +63,7 @@ describe('encodeSync / decodeSync', () => {
     expect(decodeSync(`${SYNC_PREFIX} {"t":"bogus"}`)).toBeNull();
     expect(decodeSync(`${SYNC_PREFIX} {"t":"hello","v":2,"n":"x","dv":"y","role":"p"}`)).toBeNull();
     expect(decodeSync(`${SYNC_PREFIX} {"t":"hello","v":1,"n":"x","dv":"y","role":"z"}`)).toBeNull();
-    expect(decodeSync(`${SYNC_PREFIX} {"t":"pack","n":1,"set":"xyz","seed":"s","dv":"d"}`)).toBeNull();
+    expect(decodeSync(`${SYNC_PREFIX} {"t":"pack","n":1,"set":"not-a-set!","seed":"s","dv":"d"}`)).toBeNull();
     expect(decodeSync(`${SYNC_PREFIX} {"t":"pack","n":"1","set":"neo","seed":"s","dv":"d"}`)).toBeNull();
     expect(decodeSync(`${SYNC_PREFIX} {"t":"map","m":[["id","bad-ref"]]}`)).toBeNull();
     expect(decodeSync(`${SYNC_PREFIX} {"t":"map","m":[["id"]]}`)).toBeNull();

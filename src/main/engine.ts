@@ -15,17 +15,22 @@ import {
   openPack,
   pendingMoves,
   pickCards,
+  reshufflePile,
   shufflePackIn,
+  takeFromPile,
+  takeSpecific,
   type ActivationEffect,
 } from '@shared/game/activation';
 import { reducePhase } from '@shared/game/phase';
 import { DATA_VERSION } from '@shared/packs/data';
 import { identityFor } from '@shared/packs/identity';
+import { hasSetData, onRegistryChange, registerPrints, registerSetData, unresolvedCards } from '@shared/packs/registry';
+import type { RuntimeSetData } from '@shared/packs/runtime';
 import { newSeed } from '@shared/packs/rng';
 import { rollPackOfKind, shuffleIntoPile } from '@shared/packs/roller';
 import type { CardRef, PackKind, SetCode } from '@shared/packs/types';
 import { PROTOCOL_VERSION, stockNonBattlefieldUpdates, type CardIdentity, type Zone } from '@shared/protocol';
-import { defaultConfig, emptyGameState, emptyPhase, type Config, type GamePhase, type HokGameState, type PeerView, type RolledPackRecord } from '@shared/state';
+import { defaultConfig, emptyGameState, emptyPhase, type CardSummary, type Config, type GameMode, type GamePhase, type HokGameState, type PeerView, type RolledPackRecord } from '@shared/state';
 import { chunkMapPairs, decodeSync, encodeSync, HELLO_TRAILER, isSyncLine } from '@shared/sync/codec';
 import { applySync, mappingIndex } from '@shared/sync/peers';
 import { SyncQueue } from '@shared/sync/queue';
@@ -35,6 +40,7 @@ import { EchoWaiter } from './echo';
 import { localIdFromGameState, localIdFromStorage } from './local-player';
 import { RewriteEngine } from './rewrite';
 import { runSweep, SweepError } from './sequences/sweep';
+import { bottomCount, runMulliganBottom, runMulliganDraw } from './sequences/mulligan';
 import type { FrameDecision, OutboundDecision, WsTap } from './ws-tap';
 import { ZoneIndex, type Observation } from './zone-index';
 
@@ -42,6 +48,9 @@ declare const __EXT_VERSION__: string;
 const EXT_VERSION = typeof __EXT_VERSION__ === 'string' ? __EXT_VERSION__ : 'dev';
 
 type SuppressType = 'library_viewed' | 'viewed_cards_reordered' | 'library_viewing_cleared';
+
+/** edhplay print id of Heroes of Kamigawa (Heroes of the Realm 2022). */
+export const HEROES_PRINT_ID = 'ba7d747b-7b31-482e-93c0-b14c3b6a4c5a';
 
 export class Engine {
   private readonly zones = new ZoneIndex();
@@ -61,6 +70,11 @@ export class Engine {
   private localId: string | null = null;
   private suppress: Partial<Record<SuppressType, number>> = {};
   private sweepAbort: AbortController | null = null;
+  private mulliganAbort: AbortController | null = null;
+  private lastServerError: string | null = null;
+  private pendingActivate: { set: SetCode; kind: PackKind } | null = null;
+  private pendingReveals: Array<{ ownerId: string; pack: RolledPackRecord }> = [];
+  private requestedSets = new Set<string>();
   private recording = false;
   private readonly record: unknown[] = [];
   private lastReplyAt = new Map<string, string | number>();
@@ -86,6 +100,10 @@ export class Engine {
       onReady: () => this.pushAll(),
     });
     this.localId = localIdFromStorage(safeLocalStorage(win));
+    onRegistryChange(() => {
+      this.rebuildIndex();
+      this.pushOffer();
+    });
     tap.setHandlers({
       onFrame: (ctx, msg) => this.onFrame(ctx, msg),
       onOutbound: (ctx, msg) => this.onOutbound(ctx, msg),
@@ -128,10 +146,18 @@ export class Engine {
       if (type === 'game_state') this.onGameState(ctx, msg);
       if (this.shouldSuppress(type, msg)) return { kind: 'drop' };
 
+      if (type === 'error') {
+        const text = typeof msg['message'] === 'string' ? msg['message'] : 'server rejected an action';
+        this.lastServerError = text;
+        if (this.sweepAbort || this.mulliganAbort) this.diag('warn', `server error during sequence: ${text}`);
+      }
       const observations = this.zones.apply(msg);
       const prevPhase = this.phase;
       this.phase = reducePhase(this.phase, msg, this.localId);
-      if (this.phase !== prevPhase) this.bridge.send({ type: 'phase', phase: this.phase });
+      if (this.phase !== prevPhase) {
+        this.bridge.send({ type: 'phase', phase: this.phase });
+        if (this.phase.decisionMade && !prevPhase.decisionMade) this.maybeAutoSweep();
+      }
       this.echo.offer(msg);
       this.afterObservations(observations);
       if (type === 'new_game_started') this.onNewGame();
@@ -209,11 +235,22 @@ export class Engine {
       const c = this.zones.get(m.blankId);
       if (c && c.zone === m.zone) cur = markMoveDone(cur, m.blankId, m.zone).state;
     }
-    this.state = cur;
+    this.state = this.detectMode(cur);
     this.rebuildIndex();
     this.pushState();
     this.maybeAutoSweep();
     if (cur.sweep.phase === 'done') this.sync.enqueueState(this.stateMessage());
+  }
+
+  /** Heroes of Kamigawa in the command zone → heroes mode; otherwise the pile is a second deck. */
+  private detectMode(s: HokGameState): HokGameState {
+    if (s.modeForced) return s;
+    const cz = this.zones.cardsIn('commandZone', s.playerId);
+    const heroes = cz.some((c) => c.card.card_print_id === HEROES_PRINT_ID || c.card.name === 'Heroes of Kamigawa');
+    const mode: GameMode = heroes ? 'heroes' : 'deck';
+    if (mode === s.mode) return s;
+    this.diag('info', `mode: ${mode} (${heroes ? 'Heroes of Kamigawa is your commander' : 'no Heroes of Kamigawa in the command zone'})`);
+    return { ...s, mode };
   }
 
   private onNewGame(): void {
@@ -307,7 +344,13 @@ export class Engine {
     if (msg.t === 'pack' && msg.c && msg.c.length && res.changed) {
       // Only live packs get a reveal; re-broadcasts of old packs arrive with `state` and are not "new".
       const pack: RolledPackRecord = { n: msg.n, set: msg.set, kind: msg.k ?? 'draft', seed: msg.seed, dataVersion: msg.dv, cards: msg.c, foil: msg.f ?? [] };
-      this.sendReveal(senderId, pack, false);
+      if (!hasSetData(pack.set)) {
+        this.pendingReveals.push({ ownerId: senderId, pack });
+        this.requestSet(pack.set);
+      } else {
+        this.requestPrints(pack.cards);
+        this.sendReveal(senderId, pack, false);
+      }
     }
     if (msg.t === 'shuf') this.bridge.send({ type: 'reveal-end', ownerId: senderId, n: msg.n });
     if (res.changed) {
@@ -391,6 +434,12 @@ export class Engine {
       case 'cfg':
         this.config = m.config;
         break;
+      case 'set-data':
+        this.onSetData(m.set, m.data, m.error);
+        break;
+      case 'prints':
+        registerPrints(m.entries);
+        break;
       case 'record':
         this.recording = m.on;
         if (!m.on) this.bridge.send({ type: 'record', frames: [...this.record] });
@@ -421,6 +470,41 @@ export class Engine {
         break;
       case 'begin':
         this.beginOnly();
+        break;
+      case 'mulligan':
+        void this.startMulligan();
+        break;
+      case 'mulligan-bottom':
+        void this.finishMulligan(m.ids);
+        break;
+      case 'set-mode':
+        if (this.state) {
+          this.state = m.mode === 'auto' ? this.detectMode({ ...this.state, modeForced: false }) : { ...this.state, mode: m.mode, modeForced: true };
+          this.pushState();
+        }
+        break;
+      case 'pile-draw':
+        if (this.state) this.applyStep(takeFromPile(this.state, m.count, 'hand', this.phase.turnSeq));
+        break;
+      case 'pile-mill':
+        if (this.state) this.applyStep(takeFromPile(this.state, m.count, 'graveyard', this.phase.turnSeq));
+        break;
+      case 'pile-take':
+        if (this.state) this.applyStep(takeSpecific(this.state, m.ref, m.zone, this.phase.turnSeq));
+        break;
+      case 'pile-peek':
+        if (this.state) this.sendPileView('peek', this.state.pile.slice(0, Math.max(1, m.count)));
+        break;
+      case 'pile-search':
+        if (this.state) this.sendPileView('search', this.state.pile);
+        break;
+      case 'pile-shuffle':
+        if (this.state) {
+          this.applyStep(reshufflePile(this.state, newSeed(), (pile, seed) => shuffleIntoPile(pile, [], seed)));
+          this.sync.enqueueState(this.stateMessage());
+        }
+        break;
+      case 'pile-view-close':
         break;
       case 'activate':
         this.activate(m.set, m.kind ?? 'draft');
@@ -475,7 +559,7 @@ export class Engine {
     const s = this.state;
     if (!s || !this.config.autoSweep) return;
     if (s.sweep.phase === 'done' || s.sweep.phase === 'running') return;
-    if (this.phase.mulliganActive && this.phase.handCount > 0 && !this.phase.decisionMade) void this.startSweep();
+    if (this.phase.deckSubmitted && this.phase.decisionMade && this.phase.handCount > 0) void this.startSweep();
   }
 
   private async startSweep(): Promise<void> {
@@ -486,6 +570,13 @@ export class Engine {
       this.diag('warn', 'no active game socket');
       return;
     }
+    if (this.phase.mulliganActive && !this.phase.decisionMade) {
+      const reason = 'Keep your hand in edhplay first; the sweep runs right after your keep. Use the Mulligan button here afterwards.';
+      this.state = { ...s, sweep: { phase: 'armed', stepIndex: 0, error: reason, reason } };
+      this.pushState();
+      return;
+    }
+    this.lastServerError = null;
     this.sweepAbort = new AbortController();
     this.state = { ...s, sweep: { phase: 'running', stepIndex: 0 } };
     this.pushState();
@@ -524,9 +615,10 @@ export class Engine {
       this.bridge.send({ type: 'seq', seq: 'sweep', step: 'Done', pct: 1, done: true });
       this.sync.enqueueState(this.stateMessage());
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      let msg = err instanceof Error ? err.message : String(err);
       const cur = this.state ?? s;
       const cancelled = msg === 'cancelled';
+      if (err instanceof SweepError && err.serverMessage) msg = `edhplay refused: ${err.serverMessage}`;
       this.state = { ...cur, sweep: { phase: cancelled ? 'armed' : 'failed', stepIndex: 0, error: cancelled ? undefined : msg, reason: err instanceof SweepError && err.detection?.kind !== 'found' ? msg : undefined } };
       this.diag(cancelled ? 'info' : 'error', `sweep ${cancelled ? 'cancelled' : 'failed'}: ${msg}`);
       this.bridge.send({ type: 'seq', seq: 'sweep', step: cancelled ? 'Cancelled' : 'Failed', pct: 0, error: cancelled ? undefined : msg, done: true });
@@ -543,7 +635,7 @@ export class Engine {
     const s = this.state;
     if (!s) return;
     if (s.activation && s.activation.phase !== 'done') return;
-    const r = beginActivation(clearDoneActivation(s), this.phase.turnSeq);
+    const r = beginActivation(clearDoneActivation(s), this.phase.turnSeq, s.mode === 'deck' ? 'open' : 'heroes');
     if (r.error) {
       this.diag('warn', r.error);
       return;
@@ -555,8 +647,15 @@ export class Engine {
   private activate(set: SetCode | null, kind: PackKind = 'draft'): void {
     let s = this.state;
     if (!s) return;
+    if (set && !hasSetData(set)) {
+      this.pendingActivate = { set, kind };
+      this.requestSet(set);
+      this.bridge.send({ type: 'seq', seq: 'activate', step: `Loading ${set.toUpperCase()} card list…`, pct: 0.1 });
+      return;
+    }
+    this.pendingActivate = null;
     if (!s.activation || s.activation.phase === 'done') {
-      const r = beginActivation(clearDoneActivation(s), this.phase.turnSeq);
+      const r = beginActivation(clearDoneActivation(s), this.phase.turnSeq, s.mode === 'deck' ? 'open' : 'heroes');
       if (r.error) {
         this.diag('warn', r.error);
         return;
@@ -590,11 +689,16 @@ export class Engine {
       return;
     }
     this.state = r.state;
+    if (r.state.activation?.phase === 'done' && r.state.activation.moves.length === 0) {
+      this.state = clearDoneActivation(r.state);
+      this.sync.enqueueState({ ...this.stateMessage(), pile: this.state.pile.length });
+    }
     this.rebuildIndex();
     const chatPack = r.effects.find((e): e is Extract<ActivationEffect, { kind: 'chat-pack' }> => e.kind === 'chat-pack');
     if (chatPack) {
       const p = chatPack.pack;
       this.sync.enqueue({ t: 'pack', n: p.n, set: p.set, k: p.kind, seed: p.seed, dv: p.dataVersion, c: p.cards, f: p.foil }, { priority: true });
+      this.requestPrints(p.cards);
       this.sendReveal(r.state.playerId, p, true);
     }
     const shuffled = r.effects.find((e): e is Extract<ActivationEffect, { kind: 'chat-shuffled' }> => e.kind === 'chat-shuffled');
@@ -632,6 +736,134 @@ export class Engine {
       const msg = `${still.length} move(s) not confirmed by the server. Retry, or drag the blank(s) yourself.`;
       this.diag('error', msg);
       this.bridge.send({ type: 'seq', seq: 'activate', step: 'Stuck', pct: 0.5, error: msg });
+    }
+  }
+
+  private requestSet(set: SetCode): void {
+    if (this.requestedSets.has(set)) return;
+    this.requestedSets.add(set);
+    this.bridge.send({ type: 'need-set', set });
+  }
+
+  private onSetData(set: SetCode, data: RuntimeSetData | null, error?: string): void {
+    this.requestedSets.delete(set);
+    if (!data) {
+      this.diag('error', `could not load set ${set}: ${error ?? 'unknown error'}`);
+      if (this.pendingActivate?.set === set) {
+        this.pendingActivate = null;
+        this.bridge.send({ type: 'seq', seq: 'activate', step: 'Set not available', pct: 0, error: `Could not load ${set.toUpperCase()}: ${error ?? 'unknown error'}` });
+      }
+      this.pendingReveals = this.pendingReveals.filter((p) => p.pack.set !== set);
+      return;
+    }
+    registerSetData(data);
+    this.diag('info', `loaded ${data.name}: ${data.cards.length} cards`);
+    const reveals = this.pendingReveals.filter((p) => p.pack.set === set);
+    this.pendingReveals = this.pendingReveals.filter((p) => p.pack.set !== set);
+    for (const r of reveals) {
+      this.requestPrints(r.pack.cards);
+      this.sendReveal(r.ownerId, r.pack, false);
+    }
+    this.rebuildIndex();
+    if (this.pendingActivate?.set === set) {
+      const { kind } = this.pendingActivate;
+      this.pendingActivate = null;
+      this.activate(set, kind);
+    }
+  }
+
+  private requestPrints(refs: CardRef[]): void {
+    const missing = unresolvedCards(refs);
+    if (missing.length) this.bridge.send({ type: 'need-prints', cards: missing });
+  }
+
+  private sendPileView(kind: 'peek' | 'search', refs: CardRef[]): void {
+    const cards: OfferCard[] = refs.map((ref) => ({ ref, identity: identityFor(ref) ?? placeholderIdentity(ref) }));
+    for (const c of cards) prefetch(c.identity.front_image_uri);
+    this.bridge.send({ type: 'pile-view', kind, cards, total: this.state?.pile.length ?? 0 });
+  }
+
+  // ------------------------------------------------------------------ mulligan (Commander rules, after the sweep)
+
+  private async startMulligan(): Promise<void> {
+    const s = this.state;
+    const me = this.localId;
+    if (!s || !me || this.mulliganAbort || this.sweepAbort) return;
+    if (s.sweep.phase !== 'done') {
+      this.diag('warn', 'sweep first, then mulligan');
+      return;
+    }
+    this.lastServerError = null;
+    this.mulliganAbort = new AbortController();
+    const n = s.mulligans + 1;
+    const bottom = bottomCount(n, this.config.freeFirstMulligan);
+    try {
+      const out = await runMulliganDraw({
+        me,
+        zones: this.zones,
+        echo: this.echo,
+        actions: this.actions,
+        handSize: this.config.handSize,
+        progress: (step, pct) => this.bridge.send({ type: 'seq', seq: 'mulligan', step, pct }),
+        log: (msg, data) => this.diag('info', `mulligan: ${msg}`, data),
+        signal: this.mulliganAbort.signal,
+      });
+      this.state = { ...(this.state ?? s), mulligans: n, updatedAt: Date.now() };
+      this.pushState();
+      const hand: CardSummary[] = out.hand
+        .map((id) => this.zones.get(id))
+        .filter((c): c is NonNullable<typeof c> => !!c)
+        .map((c) => ({
+          id: c.id,
+          card_print_id: String(c.card.card_print_id ?? ''),
+          name: String(c.card.name ?? ''),
+          type_line: String(c.card.type_line ?? ''),
+          zone: c.zone,
+          ownerId: c.ownerId,
+          faceDown: c.faceDown,
+          front_image_uri: String(c.card.front_image_uri ?? ''),
+        }));
+      this.bridge.send({ type: 'mulligan-choose', hand, bottom, mulligans: n });
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: bottom ? `Choose ${bottom} card(s) for the bottom` : 'Free mulligan: keep all', pct: 0.8, done: bottom === 0 });
+    } catch (err) {
+      const text = this.lastServerError ? `edhplay refused: ${this.lastServerError}` : err instanceof Error ? err.message : String(err);
+      this.diag('error', `mulligan failed: ${text}`);
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: 'Failed', pct: 0, error: text, done: true });
+    } finally {
+      this.mulliganAbort = null;
+    }
+  }
+
+  private async finishMulligan(ids: string[]): Promise<void> {
+    const me = this.localId;
+    if (!me || this.mulliganAbort) return;
+    if (!ids.length) {
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: 'Done', pct: 1, done: true });
+      return;
+    }
+    this.lastServerError = null;
+    this.mulliganAbort = new AbortController();
+    try {
+      await runMulliganBottom(
+        {
+          me,
+          zones: this.zones,
+          echo: this.echo,
+          actions: this.actions,
+          handSize: this.config.handSize,
+          progress: (step, pct) => this.bridge.send({ type: 'seq', seq: 'mulligan', step, pct }),
+          log: (msg, data) => this.diag('info', `mulligan: ${msg}`, data),
+          signal: this.mulliganAbort.signal,
+        },
+        ids,
+      );
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: 'Done', pct: 1, done: true });
+    } catch (err) {
+      const text = this.lastServerError ? `edhplay refused: ${this.lastServerError}` : err instanceof Error ? err.message : String(err);
+      this.diag('error', `mulligan bottom failed: ${text}`);
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: 'Failed', pct: 0, error: text, done: true });
+    } finally {
+      this.mulliganAbort = null;
     }
   }
 

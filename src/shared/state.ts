@@ -25,6 +25,9 @@ export interface SweepState {
 
 export type ActivationPhase = 'choose-pack' | 'rolled' | 'viewing' | 'resolving' | 'done';
 
+/** What an activation is for: the Heroes +2, or a second-deck pile operation. */
+export type ActivationOp = 'heroes' | 'open' | 'draw' | 'mill' | 'search';
+
 export interface PlannedMove {
   blankId: string;
   ref: CardRef;
@@ -35,6 +38,7 @@ export interface PlannedMove {
 
 export interface Activation {
   phase: ActivationPhase;
+  op: ActivationOp;
   turnSeq: number;
   pack: RolledPackRecord | null;
   /** cards removed from the top of the pile for this activation (≤4) */
@@ -44,11 +48,22 @@ export interface Activation {
   moves: PlannedMove[];
 }
 
+/**
+ * heroes: Heroes of Kamigawa is the commander → +2 look-four-pick-two flow.
+ * deck:   any other commander → the booster pile is a hidden second deck (draw/peek/search/mill).
+ */
+export type GameMode = 'heroes' | 'deck';
+
 /** Owner-side per-room game state. Persisted in chrome.storage.session. */
 export interface HokGameState {
   v: 1;
   roomId: string;
   playerId: string;
+  mode: GameMode;
+  /** true when the user forced the mode instead of auto-detecting from the command zone */
+  modeForced: boolean;
+  /** mulligans taken through the extension after the sweep (first one is free in Commander) */
+  mulligans: number;
   placeholderPrintId: string | null;
   placeholderName: string | null;
   sweep: SweepState;
@@ -73,6 +88,9 @@ export function emptyGameState(roomId: string, playerId: string): HokGameState {
     v: 1,
     roomId,
     playerId,
+    mode: 'heroes',
+    modeForced: false,
+    mulligans: 0,
     placeholderPrintId: null,
     placeholderName: null,
     sweep: { phase: 'disarmed', stepIndex: 0 },
@@ -147,6 +165,10 @@ export interface CardSummary {
 
 export interface Config {
   autoSweep: boolean;
+  /** Commander multiplayer rule: the first mulligan puts nothing on the bottom. */
+  freeFirstMulligan: boolean;
+  /** Recently used runtime set codes for the pack chooser. */
+  recentSets: string[];
   defaultSet: SetCode;
   handSize: number;
   minBlankCopies: number;
@@ -155,7 +177,9 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
-  autoSweep: false,
+  autoSweep: true,
+  freeFirstMulligan: true,
+  recentSets: [],
   defaultSet: 'neo',
   handSize: 7,
   minBlankCopies: 50,

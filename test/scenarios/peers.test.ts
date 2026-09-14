@@ -40,6 +40,9 @@ async function setupRoom() {
   w1.connect(server);
   w2.connect(server);
   await until(() => w1.iso.state() !== null && w2.iso.state() !== null, 'both states');
+  server.keepHand(P1);
+  server.keepHand(P2);
+  await until(() => w1.iso.last('phase')?.phase.decisionMade === true && w2.iso.last('phase')?.phase.decisionMade === true, 'both kept');
   return { server, w1, w2 };
 }
 

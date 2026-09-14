@@ -138,6 +138,14 @@ export class ZoneIndex {
     switch (ev.type) {
       case 'game_state':
         return this.applyGameState(ev);
+      case 'move_to_library_position': {
+        const id = String(ev['id'] ?? '');
+        const cur = this.get(id);
+        const owner = typeof ev['player_id'] === 'string' ? ev['player_id'] : cur?.ownerId;
+        if (!id || !owner || !cur) return [];
+        const pos = typeof ev['position'] === 'number' && ev['position'] < 0 ? undefined : 0;
+        return compact([this.place(id, owner, 'library', { position: pos, faceDown: false, patch: { visibility: 'default' }, move: true })]);
+      }
       case 'move_card':
         return compact([this.moveOne(ev)]);
       case 'cards_moved':

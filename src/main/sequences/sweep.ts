@@ -46,8 +46,28 @@ export class SweepError extends Error {
   constructor(
     message: string,
     readonly detection?: DetectResult,
+    readonly serverMessage?: string,
   ) {
     super(message);
+  }
+}
+
+/**
+ * Run `body` (which sends an action and returns the echo promise) while listening
+ * for a server `error` frame. The error listener is registered first so a fast
+ * rejection cannot slip past. Rejects with a SweepError carrying the server text.
+ */
+async function raceServerError<T>(echo: EchoWaiter, label: string, body: () => Promise<T>): Promise<T> {
+  let settled = false;
+  const err = echo.waitForType<{ message?: unknown }>('error', () => !settled, 60_000).then((e) => {
+    const text = typeof e.message === 'string' ? e.message : 'action refused';
+    throw new SweepError(`${label} refused: ${text}`, undefined, text);
+  });
+  err.catch(() => undefined);
+  try {
+    return await Promise.race([body(), err]);
+  } finally {
+    settled = true;
   }
 }
 
@@ -64,7 +84,7 @@ export async function runSweep(d: SweepDeps): Promise<SweepOutcome> {
   d.progress('Viewing library', 0.05);
   d.suppressNext('library_viewed');
   const viewed = await withTimeout(
-    (async () => {
+    raceServerError(d.echo, 'view library', async () => {
       const wait = d.echo.waitForType<{ viewed_library_cards?: WireCard[]; player_id: string }>(
         'library_viewed',
         (m) => m.player_id === d.me && Array.isArray(m.viewed_library_cards),
@@ -72,7 +92,7 @@ export async function runSweep(d: SweepDeps): Promise<SweepOutcome> {
       );
       await send({ type: 'view_library', location: 'all', count: null, target_player_id: d.me });
       return wait;
-    })(),
+    }),
     'library view',
   );
   abortIf();
@@ -115,19 +135,24 @@ export async function runSweep(d: SweepDeps): Promise<SweepOutcome> {
     await waitOrIgnore(d.echo.waitForType('library_viewing_cleared', (m) => m['player_id'] === d.me, 1500));
     abortIf();
     const ids = [...plan.handBlankIds, ...plan.libraryBlankIds];
-    const wait = d.echo.waitFor((f) => movedToLibrary(f, d.me, ids), timeout, 'batch move to library');
-    await send({ type: 'batch_move_cards', items: ids.map((id) => ({ id, zone: 'library' as const, to: 0 })) }, `move ${ids.length} blanks to library top`);
     try {
-      await wait;
+      await raceServerError(d.echo, 'move blanks', async () => {
+        const wait = d.echo.waitFor((f) => movedToLibrary(f, d.me, ids), timeout, 'batch move to library');
+        await send({ type: 'batch_move_cards', items: ids.map((id) => ({ id, zone: 'library' as const, to: 0 })) }, `move ${ids.length} blanks to library top`);
+        return wait;
+      });
       onTop = true;
     } catch (err) {
+      if (err instanceof SweepError && err.serverMessage) throw err;
       d.log('batch move echo missing, falling back to individual moves', String(err));
       // Last resort: individual moves (150 ms pacing).
       for (const id of ids) {
         abortIf();
-        const w = d.echo.waitFor((f) => movedToLibrary(f, d.me, [id]), timeout, 'move to library');
-        await send({ type: 'move_card', id, zone: 'library', to: 0 });
-        await w;
+        await raceServerError(d.echo, 'move blank', async () => {
+          const w = d.echo.waitFor((f) => movedToLibrary(f, d.me, [id]), timeout, 'move to library');
+          await send({ type: 'move_card', id, zone: 'library', to: 0 });
+          return w;
+        });
       }
       onTop = true;
     }
@@ -147,13 +172,15 @@ export async function runSweep(d: SweepDeps): Promise<SweepOutcome> {
   while (remaining > 0) {
     abortIf();
     const n = Math.min(remaining, 150);
-    const wait = d.echo.waitFor((f) => {
-      const v = verifyStep({ kind: 'exile_top', count: n }, f, plan, d.me);
-      if (typeof v === 'object') throw new SweepError(v.error);
-      return v === 'ok';
-    }, timeout, 'exile echo');
-    await send({ type: 'exile_x_cards', count: n, face_down: true });
-    const ev = await wait;
+    const ev = await raceServerError(d.echo, 'exile', async () => {
+      const wait = d.echo.waitFor((f) => {
+        const v = verifyStep({ kind: 'exile_top', count: n }, f, plan, d.me);
+        if (typeof v === 'object') throw new SweepError(v.error);
+        return v === 'ok';
+      }, timeout, 'exile echo');
+      await send({ type: 'exile_x_cards', count: n, face_down: true });
+      return wait;
+    });
     const ids = reservoirFromExileEcho(ev);
     exiled.push(...ids.filter((id) => blankSet.has(id)));
     remaining -= n;
@@ -191,10 +218,12 @@ export async function runSweep(d: SweepDeps): Promise<SweepOutcome> {
 
 async function tryReorder(d: SweepDeps, plan: SweepPlan, order: string[], timeout: number): Promise<boolean> {
   d.suppressNext('viewed_cards_reordered');
-  const wait = d.echo.waitFor((f) => verifyStep({ kind: 'reorder', blankIds: plan.libraryBlankIds }, f, plan, d.me) === 'ok', timeout, 'reorder echo');
-  await d.actions.send({ type: 'reorder_viewed_cards', card_ids: order }, `reorder library: ${plan.libraryBlankIds.length} blanks first`);
   try {
-    await wait;
+    await raceServerError(d.echo, 'reorder', async () => {
+      const wait = d.echo.waitFor((f) => verifyStep({ kind: 'reorder', blankIds: plan.libraryBlankIds }, f, plan, d.me) === 'ok', timeout, 'reorder echo');
+      await d.actions.send({ type: 'reorder_viewed_cards', card_ids: order }, `reorder library: ${plan.libraryBlankIds.length} blanks first`);
+      return wait;
+    });
     return true;
   } catch (err) {
     d.log('reorder not confirmed; using batch move', String(err));
@@ -233,6 +262,7 @@ async function withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
   try {
     return await p;
   } catch (err) {
+    if (err instanceof SweepError) throw err;
     throw new SweepError(`${label} failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

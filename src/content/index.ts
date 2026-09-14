@@ -8,11 +8,13 @@ import type { IsoToMain, MainToIso } from '@shared/bridge-contract';
 import type { Config, HokGameState } from '@shared/state';
 import { defaultConfig } from '@shared/state';
 import { Panel } from '@ui/Panel';
-import { applyMainMessage, bridgeReady, config as configSig, readOnly } from '@ui/machine';
+import { applyMainMessage, bridgeReady, config as configSig, readOnly, setList, setListError, setListLoader } from '@ui/machine';
+import type { RuntimeSetData, SetSummary } from '@shared/packs/runtime';
 import { loadConfig, loadRoomState, saveConfig, saveRoomState } from './storage';
 import { RoomLock, rpc } from './lock';
 import cssText from '@ui/styles.css?inline';
 import revealCss from '@ui/reveal.css?inline';
+import componentsCss from '@ui/components.css?inline';
 import { RevealHost } from '@ui/RevealHost';
 
 const GAME_PATH = /^\/games\/([^/]+)\/(play|spectate)\/?$/;
@@ -39,8 +41,51 @@ const bridge = new Bridge<IsoToMain, MainToIso>({
     }
     if (msg.type === 'state' && currentRoom) void saveRoomState(currentRoom, msg.state);
     if (msg.type === 'record') lastRecord = msg.frames;
+    if (msg.type === 'need-set') void answerNeedSet(msg.set);
+    if (msg.type === 'need-prints') void answerNeedPrints(msg.cards);
   },
 });
+
+async function answerNeedSet(set: string): Promise<void> {
+  try {
+    const res = await rpc<{ data: RuntimeSetData | null; error?: string }>({ m: 'sets.cards', set });
+    bridge.send({ type: 'set-data', set, data: res?.data ?? null, error: res?.error });
+    if (res?.data) rememberRecentSet(set);
+  } catch (err) {
+    bridge.send({ type: 'set-data', set, data: null, error: String(err) });
+  }
+}
+
+async function answerNeedPrints(cards: Array<{ scryfallId: string; name: string; set: string }>): Promise<void> {
+  try {
+    const entries = await rpc<Record<string, { card_print_id: string; card_id: string } | null>>({ m: 'prints.resolveCards', cards: cards.map((c) => ({ scryfallId: c.scryfallId, name: c.name })) });
+    bridge.send({ type: 'prints', entries: entries ?? {} });
+  } catch {
+    /* identities stay synthetic */
+  }
+}
+
+function rememberRecentSet(set: string): void {
+  if (['chk', 'bok', 'sok', 'neo'].includes(set)) return;
+  const recent = [set, ...config.recentSets.filter((s) => s !== set)].slice(0, 8);
+  if (recent.join() === config.recentSets.join()) return;
+  config = { ...config, recentSets: recent };
+  configSig.value = config;
+  void saveConfig(config);
+  bridge.send({ type: 'cfg', config });
+}
+
+setListLoader.load = () => {
+  setListError.value = undefined;
+  rpc<{ sets: SetSummary[] }>({ m: 'sets.list' })
+    .then((res) => {
+      setList.value = res?.sets ?? [];
+    })
+    .catch((err) => {
+      setListError.value = String(err);
+      setList.value = [];
+    });
+};
 
 async function onRoom(roomId: string, spectator: boolean): Promise<void> {
   if (roomId === currentRoom) return;
@@ -88,7 +133,7 @@ function mountPanel(): void {
   host.id = 'hok-host';
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
-  style.textContent = cssText + '\n' + revealCss;
+  style.textContent = cssText + '\n' + revealCss + '\n' + componentsCss;
   shadow.appendChild(style);
   const mount = document.createElement('div');
   shadow.appendChild(mount);

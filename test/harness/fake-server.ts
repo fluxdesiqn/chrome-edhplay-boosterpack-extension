@@ -12,6 +12,10 @@ import { FakeWs } from './fake-ws';
 export type ServerZone = 'hand' | 'library' | 'graveyard' | 'exile' | 'battlefield' | 'commandZone';
 export const SERVER_ZONES: readonly ServerZone[] = ['hand', 'library', 'graveyard', 'exile', 'battlefield', 'commandZone'];
 const HIDDEN: readonly ServerZone[] = ['hand', 'library'];
+/** Actions the live server refuses while the player's mulligan decision is pending. */
+const MULLIGAN_GATED = ['view_library', 'reorder_viewed_cards', 'batch_move_cards', 'exile_x_cards', 'draw_x_cards', 'draw_card', 'move_card', 'move_to_library_position'];
+export const MULLIGAN_VIEW_ERROR = "You can't view your library during the mulligan phase";
+export const MULLIGAN_PENDING_ERROR = 'Finish your mulligan decision first';
 
 export interface ServerPlayer {
   id: string;
@@ -19,6 +23,9 @@ export interface ServerPlayer {
   /** pristine deck, in submitted order (index 0 = first card dealt) */
   deck: WireCard[];
   zones: Record<ServerZone, WireCard[]>;
+  /** stock mulligan dialog answered (Keep) */
+  mulliganDecisionMade: boolean;
+  mulliganCount: number;
 }
 
 export interface LogEntry {
@@ -45,7 +52,12 @@ export class FakeServer {
   readonly outbox = new Map<string, Frame[]>();
   /** actions the server has no handler for */
   readonly unhandled: LogEntry[] = [];
-  readonly options = { rejectReorder: false, handSize: 7 };
+  /**
+   * `mulliganGate`: mirror the live server, which refuses library actions from a
+   * player whose stock mulligan decision is still pending (false by default so
+   * scenarios written before the gate keep working; call `keepHand()` first when on).
+   */
+  readonly options = { rejectReorder: false, handSize: 7, mulliganGate: true };
 
   turnSeq = 1;
   mulliganPhaseActive = false;
@@ -63,11 +75,44 @@ export class FakeServer {
 
   /** Deals the first `handSize` cards to the hand, the rest to the library (deck order preserved). */
   addPlayer(id: string, username: string, deck: WireCard[]): ServerPlayer {
-    const p: ServerPlayer = { id, username, deck: clone(deck), zones: emptyZones() };
+    const p: ServerPlayer = { id, username, deck: clone(deck), zones: emptyZones(), mulliganDecisionMade: false, mulliganCount: 0 };
     this.players.set(id, p);
     this.deal(p);
     if (!this.currentTurnPlayerId) this.currentTurnPlayerId = id;
+    if (this.options.mulliganGate) this.recomputeMulliganPhase();
     return p;
+  }
+
+  /**
+   * The player pressed Keep in the stock dialog: the decision is made, the room's
+   * mulligan phase closes once nobody is left undecided, and everyone hears `hand_kept`.
+   */
+  keepHand(playerId: string, cardsToBottom: string[] = []): void {
+    const p = this.player(playerId);
+    const moved: WireCard[] = [];
+    for (const id of cardsToBottom) {
+      const taken = this.take(p, id);
+      if (!taken) continue;
+      taken.card.zone = 'library';
+      p.zones.library.push(taken.card);
+      moved.push(taken.card);
+    }
+    if (moved.length > 0) {
+      const base = { type: 'cards_moved', player_id: p.id, to_zone: 'library', from_zone: 'hand', card_ids: moved.map((c) => c.id), count: moved.length, position: -1 };
+      this.broadcast((viewer) => (viewer === p.id ? { ...base, cards: moved } : base));
+    }
+    p.mulliganDecisionMade = true;
+    this.recomputeMulliganPhase();
+    this.broadcast(() => ({ type: 'hand_kept', player_id: p.id, mulligan_phase_active: this.mulliganPhaseActive, hand_count: p.zones.hand.length, library_count: p.zones.library.length }));
+  }
+
+  /** `mulligan_phase_active` stays true until every player in the room has decided. */
+  private recomputeMulliganPhase(): void {
+    this.mulliganPhaseActive = [...this.players.values()].some((p) => !p.mulliganDecisionMade);
+  }
+
+  private mulliganPending(p: ServerPlayer): boolean {
+    return this.options.mulliganGate && !p.mulliganDecisionMade;
   }
 
   urlFor(playerId: string, pv: number | string = 4): string {
@@ -107,6 +152,8 @@ export class FakeServer {
   newGame(): void {
     for (const p of this.players.values()) {
       p.zones = emptyZones();
+      p.mulliganDecisionMade = false;
+      p.mulliganCount = 0;
       this.deal(p);
     }
     this.turnSeq = 1;
@@ -177,8 +224,8 @@ export class FakeServer {
         hand_count: p.zones.hand.length,
         library_count: p.zones.library.length,
         deck_submitted: true,
-        mulligan_decision_made: false,
-        mulligan_count: 0,
+        mulligan_decision_made: p.mulliganDecisionMade,
+        mulligan_count: p.mulliganCount,
         eliminated: false,
       };
     });
@@ -217,9 +264,20 @@ export class FakeServer {
   private handle(pid: string, msg: Frame): void {
     const p = this.player(pid);
     const z = p.zones;
-    switch (msg['type']) {
+    const type = String(msg['type']);
+    if (MULLIGAN_GATED.includes(type) && this.mulliganPending(p)) {
+      this.emit(pid, { type: 'error', message: type === 'view_library' ? MULLIGAN_VIEW_ERROR : MULLIGAN_PENDING_ERROR });
+      return;
+    }
+    switch (type) {
       case 'pong':
         return;
+
+      case 'keep_hand': {
+        const ids = Array.isArray(msg['cards_to_bottom']) ? (msg['cards_to_bottom'] as unknown[]).map(String) : [];
+        this.keepHand(pid, ids);
+        return;
+      }
 
       case 'resync':
         this.emit(pid, this.gameStateFor(pid));
@@ -264,8 +322,27 @@ export class FakeServer {
         }
         for (const c of moved) c.zone = toZone;
         z[toZone] = bottom ? [...z[toZone], ...moved] : [...moved, ...z[toZone]];
-        const base = { type: 'cards_moved', player_id: pid, to_zone: toZone, from_zone: fromZone, card_ids: moved.map((c) => c.id), count: moved.length, position: bottom ? -1 : 0 };
+        const shuffled = msg['shuffle'] === true && toZone === 'library';
+        if (shuffled) z.library = this.shuffle(z.library);
+        const base = { type: 'cards_moved', player_id: pid, to_zone: toZone, from_zone: fromZone, card_ids: moved.map((c) => c.id), count: moved.length, position: bottom ? -1 : 0, ...(shuffled ? { shuffled: true } : {}) };
         this.broadcast((viewer) => (viewer !== pid && HIDDEN.includes(toZone) ? base : { ...base, cards: moved }));
+        return;
+      }
+
+      case 'move_to_library_position': {
+        // Card context menu → Library top (0) / bottom (-1).
+        const id = String(msg['id']);
+        const position = Number(msg['position'] ?? 0);
+        const taken = this.take(p, id);
+        if (!taken) {
+          this.emit(pid, { type: 'error', message: `card ${id} not found` });
+          return;
+        }
+        this.put(p, taken.card, 'library', position < 0 ? undefined : position);
+        // The zone index does not know `move_to_library_position`; a `cards_moved` echo keeps it in step.
+        const moved = { type: 'cards_moved', player_id: pid, to_zone: 'library', from_zone: taken.from, card_ids: [id], count: 1, position };
+        this.broadcast((viewer) => (viewer === pid ? { ...moved, cards: [taken.card] } : moved));
+        this.broadcast(() => ({ type: 'move_to_library_position', player_id: pid, id, position, from_zone: taken.from }));
         return;
       }
 
@@ -405,10 +482,13 @@ export class FakeServer {
   // ------------------------------------------------------------------ state helpers
 
   private deal(p: ServerPlayer): void {
-    const cards = clone(p.deck);
+    const all = clone(p.deck);
+    const commanders = all.filter((c) => c.zone === 'commandZone');
+    const cards = all.filter((c) => c.zone !== 'commandZone');
     const n = this.options.handSize;
     p.zones.hand = cards.slice(0, n);
     p.zones.library = cards.slice(n);
+    p.zones.commandZone = commanders;
     for (const c of p.zones.hand) c.zone = 'hand';
     for (const c of p.zones.library) c.zone = 'library';
   }

@@ -208,6 +208,10 @@ export type OutboundAction =
   | { type: 'draw_card' }
   /** UI gesture: library menu → Shuffle. */
   | { type: 'shuffle_library' }
+  /** UI gesture: card context menu → Library top (0) / Library bottom (-1). */
+  | { type: 'move_to_library_position'; id: string; position: number }
+  /** UI gesture: the Keep button of the mulligan dialog (cards chosen for the bottom, in order). */
+  | { type: 'keep_hand'; cards_to_bottom: string[] }
   /** UI gesture: type into the chat box. */
   | { type: 'send_chat_message'; message: string }
   /** UI gesture: create card dialog → Sideboard tab (or a token). */

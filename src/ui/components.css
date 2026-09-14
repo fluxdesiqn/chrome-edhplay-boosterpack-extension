@@ -1,0 +1,65 @@
+/* Prop-driven panel components: SetPicker (hok-sp-), PileView (hok-pv-), MulliganChooser (hok-mc-).
+   Appended after styles.css inside the same shadow root; palette matches .hok-root. */
+
+/* ---- SetPicker ---- */
+.hok-sp-block { margin-top: 10px; }
+.hok-sp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hok-sp-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  background: #24193a; border: 1px solid #4a3a66; color: #cfc6e0;
+  padding: 3px 8px 3px 4px; border-radius: 999px; cursor: pointer; font-size: 11px;
+}
+.hok-sp-chip:hover { background: #33264d; }
+.hok-sp-chip.selected { background: #4d3a75; border-color: #b79cff; color: #fff; }
+.hok-sp-chipname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.hok-sp-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .4px;
+  padding: 1px 5px; border-radius: 4px; background: #3d2e57; color: #d8c8ff;
+}
+.hok-sp-search { position: relative; }
+.hok-sp-input { width: 100%; }
+.hok-sp-results {
+  margin: 4px 0 0; padding: 2px; list-style: none;
+  background: #120d1c; border: 1px solid #4a3a66; border-radius: 6px;
+  max-height: 220px; overflow: auto;
+}
+.hok-sp-result {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 4px; cursor: pointer; font-size: 12px;
+}
+.hok-sp-result.active { background: #33264d; }
+.hok-sp-result.selected .hok-sp-name { color: #b6f0cc; }
+.hok-sp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hok-sp-year { font-size: 11px; }
+.hok-sp-empty, .hok-sp-loading { padding: 4px 0; font-size: 12px; }
+.hok-sp-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hok-sp-current { margin-top: 6px; font-size: 12px; }
+
+/* ---- PileView ---- */
+.hok-pv-head { display: flex; align-items: center; gap: 6px; }
+.hok-pv-title { flex: 1; margin: 0; }
+.hok-pv-x { font-size: 16px; line-height: 1; }
+.hok-pv-filter { width: 100%; margin: 4px 0 8px; }
+.hok-pv-sub { margin: -2px 0 6px; font-size: 12px; }
+.hok-pv-scroll { max-height: 380px; overflow: auto; padding-right: 2px; }
+.hok-pv-item { display: flex; flex-direction: column; gap: 4px; }
+.hok-pv-card { cursor: default; }
+.hok-pv-pos { font-weight: 600; letter-spacing: .3px; }
+.hok-pv-actions { display: flex; gap: 4px; }
+.hok-pv-actions .hok-pv-take { flex: 1; padding: 4px 4px; font-size: 11px; white-space: nowrap; }
+.hok-pv-empty { padding: 10px 0; text-align: center; }
+.hok-pv-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* ---- MulliganChooser ---- */
+.hok-mc-rule { margin-top: 0; }
+.hok-mc-count { font-size: 12px; margin-bottom: 6px; }
+.hok-mc-card { transition: opacity .15s, border-color .15s; }
+.hok-mc-card--static { cursor: default; }
+.hok-mc-grid--full .hok-mc-card:not(.picked) { opacity: .55; }
+.hok-mc-grid--full .hok-mc-card:not(.picked):hover { opacity: .8; }
+.hok-mc-card[aria-disabled="true"] { cursor: not-allowed; }
+.hok-mc-order {
+  left: auto; right: 4px; top: 4px; font-size: 12px; font-weight: 700; min-width: 20px; text-align: center;
+  background: #7dffb0; color: #10241a; padding: 1px 6px;
+}
+.hok-mc-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }

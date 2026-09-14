@@ -4,7 +4,7 @@
  * for the engine to perform.
  */
 import type { CardRef, PackKind, RolledPack, SetCode } from '../packs/types';
-import type { Activation, HokGameState, PlannedMove, RolledPackRecord } from '../state';
+import type { Activation, ActivationOp, HokGameState, PlannedMove, RolledPackRecord } from '../state';
 
 export type ActivationEffect =
   | { kind: 'chat-pack'; pack: RolledPackRecord }
@@ -24,15 +24,15 @@ export const KEEP_COUNT = 2;
 
 const touch = (s: HokGameState): HokGameState => ({ ...s, updatedAt: Date.now() });
 
-/** Start an activation: choose a set (or null = "no pack"). */
-export function beginActivation(state: HokGameState, turnSeq: number): StepResult {
+/** Start an activation: choose a set (or null = "no pack"). `op` = heroes (+2) or a second-deck pack opening. */
+export function beginActivation(state: HokGameState, turnSeq: number, op: ActivationOp = 'heroes'): StepResult {
   if (state.activation && state.activation.phase !== 'done') {
     return { state, effects: [], error: 'activation already in progress' };
   }
   if (state.sweep.phase !== 'done') {
     return { state, effects: [], error: 'sweep not completed' };
   }
-  const activation: Activation = { phase: 'choose-pack', turnSeq, pack: null, look: [], toHand: [], moves: [] };
+  const activation: Activation = { phase: 'choose-pack', op, turnSeq, pack: null, look: [], toHand: [], moves: [] };
   return { state: touch({ ...state, activation }), effects: [{ kind: 'persist' }] };
 }
 
@@ -79,6 +79,11 @@ function takeLook(
   const a = state.activation!;
   let pile = state.pile;
   if (a.pack) pile = shuffleInto(pile, a.pack.cards, a.pack.seed);
+  if (a.op === 'open') {
+    // Second-deck mode: the pack just joins the pile; nothing is looked at or taken.
+    const done: Activation = { ...a, phase: 'done', look: [], toHand: [], moves: [] };
+    return { state: touch({ ...state, pile, activation: done }), effects: [...effects, { kind: 'persist' }] };
+  }
   const lookCount = Math.min(LOOK_COUNT, pile.length);
   const look = pile.slice(0, lookCount);
   const rest = pile.slice(lookCount);
@@ -206,4 +211,55 @@ export function pendingMoves(state: HokGameState): PlannedMove[] {
   const a = state.activation;
   if (!a || a.phase !== 'resolving') return [];
   return a.moves.filter((m) => !m.done);
+}
+
+// ---------------------------------------------------------------------------
+// Second-deck mode: the booster pile is a hidden deck the owner draws from.
+// ---------------------------------------------------------------------------
+
+/** Plan moves for the top `count` cards of the pile into `zone` (draw → hand, mill → graveyard). */
+export function takeFromPile(state: HokGameState, count: number, zone: 'hand' | 'graveyard', turnSeq: number): StepResult {
+  if (state.activation && state.activation.phase !== 'done') return { state, effects: [], error: 'another operation is in progress' };
+  if (state.sweep.phase !== 'done') return { state, effects: [], error: 'sweep not completed' };
+  const n = Math.min(count, state.pile.length);
+  if (n <= 0) return { state, effects: [], error: 'booster pile is empty' };
+  if (state.reservoir.length < n) return { state, effects: [], error: `need ${n} blanks, have ${state.reservoir.length}` };
+  const refs = state.pile.slice(0, n);
+  return placeRefs({ ...state, pile: state.pile.slice(n) }, refs, zone, zone === 'hand' ? 'draw' : 'mill', turnSeq);
+}
+
+/** Take one specific card out of the pile (a "search"). */
+export function takeSpecific(state: HokGameState, ref: CardRef, zone: 'hand' | 'graveyard', turnSeq: number): StepResult {
+  if (state.activation && state.activation.phase !== 'done') return { state, effects: [], error: 'another operation is in progress' };
+  if (state.sweep.phase !== 'done') return { state, effects: [], error: 'sweep not completed' };
+  const i = state.pile.indexOf(ref);
+  if (i < 0) return { state, effects: [], error: 'card is not in the booster pile' };
+  if (state.reservoir.length < 1) return { state, effects: [], error: 'no blanks left' };
+  const pile = [...state.pile.slice(0, i), ...state.pile.slice(i + 1)];
+  return placeRefs({ ...state, pile }, [ref], zone, 'search', turnSeq);
+}
+
+function placeRefs(state: HokGameState, refs: CardRef[], zone: 'hand' | 'graveyard', op: ActivationOp, turnSeq: number): StepResult {
+  const blanks = state.reservoir.slice(0, refs.length);
+  const reservoir = state.reservoir.slice(refs.length);
+  const mappings = { ...state.mappings };
+  const announced = [...state.announced];
+  const moves: PlannedMove[] = refs.map((ref, i) => {
+    const blankId = blanks[i]!;
+    mappings[blankId] = { ref, public: zone === 'graveyard', assignedAt: turnSeq };
+    if (zone === 'graveyard' && !announced.includes(blankId)) announced.push(blankId);
+    return { blankId, ref, zone, sent: false, done: false };
+  });
+  const effects: ActivationEffect[] = [{ kind: 'persist' }];
+  if (zone === 'graveyard') effects.push({ kind: 'chat-map', pairs: moves.map((m) => [m.blankId, m.ref]) });
+  for (const m of moves) effects.push({ kind: 'move', move: m });
+  const activation: Activation = { phase: 'resolving', op, turnSeq, pack: null, look: refs, toHand: zone === 'hand' ? refs.map((_, i) => i) : [], moves };
+  return { state: touch({ ...state, reservoir, mappings, announced, activation }), effects };
+}
+
+/** Reshuffle the whole booster pile with a fresh seed. */
+export function reshufflePile(state: HokGameState, seed: string, shuffle: (pile: CardRef[], seed: string) => CardRef[]): StepResult {
+  if (state.activation && state.activation.phase !== 'done') return { state, effects: [], error: 'another operation is in progress' };
+  if (state.pile.length < 2) return { state, effects: [] };
+  return { state: touch({ ...state, pile: shuffle(state.pile, seed) }), effects: [{ kind: 'persist' }] };
 }

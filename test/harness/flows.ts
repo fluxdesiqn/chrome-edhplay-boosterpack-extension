@@ -9,12 +9,17 @@ export const P1 = 'aaaaaaaa-1111-4000-8000-000000000001';
 export const P2 = 'bbbbbbbb-2222-4000-8000-000000000002';
 
 /** Add the player to the server, build a world, hydrate a fresh room, connect, and wait for the first state push. */
-export async function bootPlayer(server: FakeServer, playerId: string, deck: DeckSpec, opts: { state?: HokGameState | null } = {}): Promise<World> {
+export async function bootPlayer(server: FakeServer, playerId: string, deck: DeckSpec, opts: { state?: HokGameState | null; keep?: boolean } = {}): Promise<World> {
   server.addPlayer(playerId, `user-${playerId.slice(0, 8)}`, buildDeck(deck, playerId));
   const world = createWorld({ playerId, roomId: server.roomId });
   world.hydrate(opts.state ?? null);
   world.connect(server);
   await until(() => world.iso.state() !== null, `${playerId.slice(0, 8)} first state`);
+  if (opts.keep !== false) {
+    // The player presses Keep in edhplay's own dialog; only then are library actions allowed.
+    server.keepHand(playerId);
+    await until(() => world.iso.last('phase')?.phase.decisionMade === true, `${playerId.slice(0, 8)} kept`);
+  }
   return world;
 }
 

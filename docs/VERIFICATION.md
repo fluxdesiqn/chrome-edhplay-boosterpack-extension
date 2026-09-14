@@ -7,7 +7,7 @@ Run with three accounts (two with the extension, one without) in a **Free Comman
 | # | Check | Expected | Notes |
 |---|---|---|---|
 | 1 | `game_state` for the owner | does it include the own `library` array or only `library_count`? | The sweep views the library either way. |
-| 2 | Zone actions during the mulligan phase | `view_library`, `batch_move_cards`, `exile_x_cards`, `draw_x_cards` echo normally | If refused, sweep after *Keep* and use *Sweep stragglers* for blanks drawn later. |
+| 2 | Zone actions during the mulligan phase | **Confirmed refused live** ("you can't view your library"). The extension now sweeps only after your keep and offers its own Commander mulligan. | Check that `batch_move_cards … shuffle:true`, `draw_x_cards` and `move_to_library_position` echo normally after the keep. |
 | 3 | `exile_x_cards {count:50}` | one `cards_moved` echo with 50 cards, `face_down:true` | If the server caps `count`, the sweep loops in chunks of 150; lower the chunk in `sequences/sweep.ts` if needed. |
 | 4 | `reorder_viewed_cards` | `viewed_cards_reordered` echo | Fallback to `batch_move_cards` is automatic. |
 | 5 | `draw_x_cards {count:3}` echo shape | `cards_moved {to_zone:'hand', count:3, cards:[…]}` | |

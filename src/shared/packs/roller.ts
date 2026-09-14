@@ -8,19 +8,11 @@
  * that pool (even when only one candidate remains), so the RNG stream consumed is
  * a pure function of the pack kind and the data.
  */
-import { DATA_VERSION, SET_DATA } from './data';
+import { DATA_VERSION } from './data';
+import { type AnySetData, getSetData, isRuntimeSetData } from './registry';
 import { fisherYates, makeRng, type Rng } from './rng';
-import {
-  AVAILABLE_PACKS,
-  makeRef,
-  type CardRef,
-  type PackCard,
-  type PackKind,
-  type Rarity,
-  type RolledPack,
-  type SetCode,
-  type SetData,
-} from './types';
+import type { RuntimeSetData } from './runtime';
+import { type BundledSet, type CardRef, type PackCard, type PackKind, type Rarity, type RolledPack, type SetCode, availablePacks, isBundledSet, makeRef } from './types';
 
 export type SlotKind = 'rare' | 'uncommon' | 'common' | 'flex' | 'land';
 
@@ -41,7 +33,7 @@ const rep = (kind: SlotKind, n: number): SlotKind[] => Array.from({ length: n },
 const CLASSIC: PackTemplate = { slots: ['rare', ...rep('uncommon', 3), ...rep('common', 11)] };
 
 /** Draft booster templates. */
-export const TEMPLATES: Record<SetCode, PackTemplate> = {
+export const TEMPLATES: Record<BundledSet, PackTemplate> = {
   chk: CLASSIC,
   bok: CLASSIC,
   sok: CLASSIC,
@@ -53,7 +45,63 @@ export const TEMPLATES: Record<SetCode, PackTemplate> = {
   },
 };
 
+/** Card counts of the bundled products (runtime sets: see `packSize`). */
 export const PACK_SIZE: Record<PackKind, number> = { draft: 15, set: 12, collector: 15 };
+
+/** Generic draft template: 15 cards, or 14 for Play Booster era sets. */
+export const GENERIC_PACK_SIZE = 15;
+/** Generic draft template: chance the rare slot is a mythic. */
+export const GENERIC_MYTHIC_ODDS: Odds = [1, 8];
+
+/**
+ * Number of cards `rollPackOfKind(set, kind, …)` produces. Bundled sets use the
+ * product sizes; runtime sets use the `packSize` hint of their data (15 when the
+ * set is not registered yet).
+ */
+export function packSize(set: SetCode, kind: PackKind, data: AnySetData | undefined = getSetData(set)): number {
+  if (isBundledSet(set) || !data || !isRuntimeSetData(data)) return PACK_SIZE[kind];
+  return data.packSize === 14 ? 14 : GENERIC_PACK_SIZE;
+}
+
+/**
+ * Draft template for a set without a hand-written one (runtime sets), derived
+ * from the data alone so peers rebuild the same template from the same cards:
+ *
+ *   slot 0            rare — or a mythic with odds 1/8 when the set has mythics
+ *                     (`hasMythics` and a non-empty mythic pool);
+ *   slots 1–3         three uncommons;
+ *   next slots        commons, as many as needed to fill the pack;
+ *   last slot         a basic land when the data carries `basics`, otherwise
+ *                     one more common.
+ *
+ * Total = `packSize` (14 when the data says 14, else 15). Every slot is drawn
+ * with one `nextInt` over the not-yet-used members of its pool (`Drawer.pick`),
+ * plus one `nextInt` for the mythic roll when the set has mythics, so the RNG
+ * stream is a pure function of the data. No card (by Scryfall id or by name)
+ * appears twice.
+ */
+export function genericTemplate(data: RuntimeSetData, pools: Pools = poolsFor(data.code, data)): PackTemplate {
+  const size = data.packSize === 14 ? 14 : GENERIC_PACK_SIZE;
+  const hasLand = pools.basics.length > 0;
+  const commons = size - 1 - 3 - (hasLand ? 1 : 0);
+  const template: PackTemplate = { slots: ['rare', ...rep('uncommon', 3), ...rep('common', commons), ...(hasLand ? (['land'] as const) : [])] };
+  if (data.hasMythics && pools.mythic.length > 0) template.mythicOdds = GENERIC_MYTHIC_ODDS;
+  return template;
+}
+
+const templateCache = new WeakMap<RuntimeSetData, PackTemplate>();
+
+/** The draft template a set rolls with: hand-written for bundled sets, derived for runtime sets. */
+export function templateFor(set: SetCode, data: AnySetData | undefined = getSetData(set)): PackTemplate {
+  if (isBundledSet(set)) return TEMPLATES[set];
+  if (!data || !isRuntimeSetData(data)) throw new Error(`templateFor: no set data for ${set}`);
+  let t = templateCache.get(data);
+  if (!t) {
+    t = genericTemplate(data, poolsFor(set, data));
+    templateCache.set(data, t);
+  }
+  return t;
+}
 
 /** Mythic-instead-of-rare odds for NEO (10 mythics over 74 rare-slot printings' worth of sheets). */
 const NEO_MYTHIC_ODDS: Odds = [10, 74];
@@ -83,9 +131,9 @@ export interface Pools {
 
 const isLand = (c: PackCard): boolean => c.t.startsWith('Land');
 
-export function buildPools(data: SetData): Pools {
+export function buildPools(data: AnySetData): Pools {
   const cards = data.cards;
-  const variants = data.variants ?? [];
+  const variants = ('variants' in data ? data.variants : undefined) ?? [];
   return {
     rare: cards.filter((c) => c.r === 'r'),
     mythic: cards.filter((c) => c.r === 'm'),
@@ -101,9 +149,15 @@ export function buildPools(data: SetData): Pools {
   };
 }
 
-const poolCache = new WeakMap<SetData, Pools>();
+const poolCache = new WeakMap<AnySetData, Pools>();
 
-export function poolsFor(set: SetCode, data: SetData = SET_DATA[set]): Pools {
+function requireData(set: SetCode, data: AnySetData | undefined): AnySetData {
+  if (!data) throw new Error(`no set data for ${set} (fetch and registerSetData it first)`);
+  return data;
+}
+
+export function poolsFor(set: SetCode, data: AnySetData | undefined = getSetData(set)): Pools {
+  data = requireData(set, data);
   let pools = poolCache.get(data);
   if (!pools) {
     pools = buildPools(data);
@@ -176,8 +230,7 @@ const byRarity = (pools: Pools, r: Rarity): PackCard[] =>
 // Draft booster
 // ---------------------------------------------------------------------------
 
-function rollDraft(set: SetCode, rng: Rng, pools: Pools): PackCard[] {
-  const template = TEMPLATES[set];
+function rollDraft(set: SetCode, rng: Rng, pools: Pools, template: PackTemplate): PackCard[] {
   const draw = new Drawer(rng, `${set}/draft`);
   const cards: PackCard[] = [];
   for (const slot of template.slots) {
@@ -285,13 +338,46 @@ function rollCollector(set: SetCode, rng: Rng, pools: Pools): { cards: PackCard[
 // ---------------------------------------------------------------------------
 
 /**
- * Roll a pack of the given kind. Throws when `kind` is not sold for `set`
- * (see `AVAILABLE_PACKS`).
+ * Data version stamped on packs of `set`: the bundled `DATA_VERSION` for bundled
+ * sets; for runtime sets a fingerprint (FNV-1a over code, pack size, mythic flag
+ * and every card id in order) so two peers holding the same Scryfall snapshot
+ * verify each other's packs and differing snapshots are treated as unverifiable.
  */
-export function rollPackOfKind(set: SetCode, kind: PackKind, seedHex: string, data: SetData = SET_DATA[set]): RolledPack {
-  if (!AVAILABLE_PACKS[set].includes(kind)) {
+export function dataVersionFor(set: SetCode, data: AnySetData | undefined = getSetData(set)): string {
+  if (isBundledSet(set) || !data || !isRuntimeSetData(data)) return DATA_VERSION;
+  let v = versionCache.get(data);
+  if (!v) {
+    let h = 0x811c9dc5;
+    const mix = (str: string): void => {
+      for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+      }
+      h ^= 0x7c;
+      h = Math.imul(h, 0x01000193) >>> 0;
+    };
+    mix(data.code);
+    mix(String(data.packSize));
+    mix(data.hasMythics ? '1' : '0');
+    for (const c of data.cards) mix(c.id);
+    mix('basics');
+    for (const c of data.basics) mix(c.id);
+    v = 'rt' + h.toString(16).padStart(8, '0');
+    versionCache.set(data, v);
+  }
+  return v;
+}
+const versionCache = new WeakMap<RuntimeSetData, string>();
+
+/**
+ * Roll a pack of the given kind. Throws when `kind` is not sold for `set`
+ * (see `availablePacks`) or when no data is known for `set`.
+ */
+export function rollPackOfKind(set: SetCode, kind: PackKind, seedHex: string, data: AnySetData | undefined = getSetData(set)): RolledPack {
+  if (!availablePacks(set).includes(kind)) {
     throw new Error(`rollPackOfKind: ${set} has no ${kind} boosters`);
   }
+  data = requireData(set, data);
   const pools = poolsFor(set, data);
   const rng = makeRng(seedHex);
 
@@ -299,7 +385,7 @@ export function rollPackOfKind(set: SetCode, kind: PackKind, seedHex: string, da
   let foil: number[];
   switch (kind) {
     case 'draft':
-      cards = rollDraft(set, rng, pools);
+      cards = rollDraft(set, rng, pools, templateFor(set, data));
       foil = [];
       break;
     case 'set':
@@ -310,11 +396,11 @@ export function rollPackOfKind(set: SetCode, kind: PackKind, seedHex: string, da
       break;
   }
 
-  return { set, kind, seed: seedHex, dataVersion: DATA_VERSION, cards: cards.map((c) => makeRef(set, c.cn)), foil };
+  return { set, kind, seed: seedHex, dataVersion: dataVersionFor(set, data), cards: cards.map((c) => makeRef(set, c.cn)), foil };
 }
 
 /** Roll a Draft Booster. Equivalent to `rollPackOfKind(set, 'draft', seedHex, data)`. */
-export function rollPack(set: SetCode, seedHex: string, data: SetData = SET_DATA[set]): RolledPack {
+export function rollPack(set: SetCode, seedHex: string, data: AnySetData | undefined = getSetData(set)): RolledPack {
   return rollPackOfKind(set, 'draft', seedHex, data);
 }
 
@@ -329,13 +415,16 @@ export function shuffleIntoPile(pile: CardRef[], pack: CardRef[], seedHex: strin
 
 /**
  * Re-roll `pack` from its seed and compare cards and foil indices. Returns true
- * when the data version differs (we cannot verify against data we do not have).
+ * (unverifiable) when we hold no data for the set or when the data version
+ * differs from ours — we cannot verify against data we do not have.
  */
 export function verifyPack(pack: RolledPack): boolean {
-  if (pack.dataVersion !== DATA_VERSION) return true;
+  const data = getSetData(pack.set);
+  if (!data) return true;
+  if (pack.dataVersion !== dataVersionFor(pack.set, data)) return true;
   let again: RolledPack;
   try {
-    again = rollPackOfKind(pack.set, pack.kind ?? 'draft', pack.seed);
+    again = rollPackOfKind(pack.set, pack.kind ?? 'draft', pack.seed, data);
   } catch {
     return false;
   }

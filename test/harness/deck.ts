@@ -1,6 +1,7 @@
 /** Deterministic decks for the scenarios, built from the unit-test fixtures. */
 import type { WireCard } from '@shared/protocol';
-import { makeReal, makeWastes } from '../fixtures/game-state';
+import { makeCard, makeReal, makeWastes } from '../fixtures/game-state';
+import { HEROES_PRINT_ID } from '@main/engine';
 
 export interface DeckSpec {
   wastes: number;
@@ -8,6 +9,8 @@ export interface DeckSpec {
   /** blanks placed among the first `handSize` cards (default 3; 0 = no hand blanks) */
   handWastes?: number;
   handSize?: number;
+  /** 'heroes' puts Heroes of Kamigawa in the command zone; 'other' any other commander; default 'heroes' */
+  commander?: 'heroes' | 'other' | 'none';
 }
 
 /**
@@ -21,5 +24,19 @@ export function buildDeck(spec: DeckSpec, ownerId: string): WireCard[] {
   if (spec.real < handReal) throw new Error(`buildDeck: need at least ${handReal} real cards for the opening hand`);
   const wastes = makeWastes(spec.wastes, ownerId, 'library');
   const real = makeReal(spec.real, ownerId, 'library');
-  return [...wastes.slice(0, handWastes), ...real.slice(0, handReal), ...wastes.slice(handWastes), ...real.slice(handReal)];
+  const commander = spec.commander ?? 'heroes';
+  const cz: WireCard[] =
+    commander === 'none'
+      ? []
+      : [
+          makeCard({
+            owner_id: ownerId,
+            zone: 'commandZone',
+            card_print_id: commander === 'heroes' ? HEROES_PRINT_ID : 'print-other-commander',
+            card_id: commander === 'heroes' ? 'card-heroes' : 'card-other-commander',
+            name: commander === 'heroes' ? 'Heroes of Kamigawa' : 'Some Other Commander',
+            type_line: commander === 'heroes' ? 'Legendary Planeswalker — Kaito Wanderer' : 'Legendary Creature — Human',
+          }),
+        ];
+  return [...cz, ...wastes.slice(0, handWastes), ...real.slice(0, handReal), ...wastes.slice(handWastes), ...real.slice(handReal)];
 }

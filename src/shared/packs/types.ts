@@ -1,8 +1,16 @@
-/** Kamigawa booster sets that can be rolled. */
-export type SetCode = 'chk' | 'bok' | 'sok' | 'neo';
-export const SET_CODES: readonly SetCode[] = ['chk', 'bok', 'sok', 'neo'];
+/** Any Scryfall set code (lower case, 2–6 alphanumerics). */
+export type SetCode = string;
+/** The Kamigawa sets whose data ships inside the extension. */
+export type BundledSet = 'chk' | 'bok' | 'sok' | 'neo';
+export const SET_CODES: readonly BundledSet[] = ['chk', 'bok', 'sok', 'neo'];
+export function isBundledSet(set: string): set is BundledSet {
+  return (SET_CODES as readonly string[]).includes(set);
+}
+export function isValidSetCode(set: string): boolean {
+  return /^[a-z0-9]{2,6}$/.test(set);
+}
 
-export const SET_NAMES: Record<SetCode, string> = {
+export const SET_NAMES: Record<BundledSet, string> = {
   chk: 'Champions of Kamigawa',
   bok: 'Betrayers of Kamigawa',
   sok: 'Saviors of Kamigawa',
@@ -15,14 +23,26 @@ export type Rarity = 'c' | 'u' | 'r' | 'm';
 export type PackKind = 'draft' | 'set' | 'collector';
 export const PACK_KINDS: readonly PackKind[] = ['draft', 'set', 'collector'];
 export const PACK_KIND_NAMES: Record<PackKind, string> = { draft: 'Draft Booster', set: 'Set Booster', collector: 'Collector Booster' };
-export const AVAILABLE_PACKS: Record<SetCode, readonly PackKind[]> = {
+export const AVAILABLE_PACKS: Record<BundledSet, readonly PackKind[]> = {
   chk: ['draft'],
   bok: ['draft'],
   sok: ['draft'],
   neo: ['draft', 'set', 'collector'],
 };
+/** Booster kinds that can be rolled for a set (runtime-fetched sets are draft only). */
+export function availablePacks(set: SetCode): readonly PackKind[] {
+  return isBundledSet(set) ? AVAILABLE_PACKS[set] : ['draft'];
+}
+/** Human name for a set: bundled name, a registered runtime name, or the upper-cased code. */
+const runtimeSetNames = new Map<string, string>();
+export function registerSetName(set: SetCode, name: string): void {
+  runtimeSetNames.set(set, name);
+}
+export function setName(set: SetCode): string {
+  return isBundledSet(set) ? SET_NAMES[set] : (runtimeSetNames.get(set) ?? set.toUpperCase());
+}
 export function packLabel(set: SetCode, kind: PackKind): string {
-  return `${SET_NAMES[set]} ${PACK_KIND_NAMES[kind]}`;
+  return `${setName(set)} ${PACK_KIND_NAMES[kind]}`;
 }
 
 /** Alternate-frame printing kinds: showcase, borderless, extended art, foil-etched / neon ink. */
@@ -80,10 +100,10 @@ export function makeRef(set: SetCode, cn: string): CardRef {
 export function parseRef(ref: string): { set: SetCode; cn: string } | null {
   const i = ref.indexOf(':');
   if (i <= 0) return null;
-  const set = ref.slice(0, i) as SetCode;
-  if (!SET_CODES.includes(set)) return null;
+  const set = ref.slice(0, i);
+  if (!isValidSetCode(set)) return null;
   const cn = ref.slice(i + 1);
-  if (!cn) return null;
+  if (!cn || cn.includes(':')) return null;
   return { set, cn };
 }
 
