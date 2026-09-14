@@ -789,10 +789,12 @@ export class Engine {
     const s = this.state;
     const me = this.localId;
     if (!s || !me || this.mulliganAbort || this.sweepAbort) return;
-    if (s.sweep.phase !== 'done') {
-      this.diag('warn', 'sweep first, then mulligan');
+    if (this.phase.mulliganActive && !this.phase.decisionMade) {
+      const text = 'Keep your hand in edhplay first; then mulligan from here.';
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: 'Blocked', pct: 0, error: text, done: true });
       return;
     }
+    if (s.sweep.phase !== 'done') this.diag('warn', 'mulligan before the sweep: any blanks drawn are handled by the next sweep');
     this.lastServerError = null;
     this.mulliganAbort = new AbortController();
     const n = s.mulligans + 1;

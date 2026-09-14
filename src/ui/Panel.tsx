@@ -144,6 +144,7 @@ function GameTab({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: P
       <PhaseLine />
       {sc === 'deck-check' && <DeckCheck send={send} onConfig={onConfig} />}
       {sc === 'sweep' && <Sweep send={send} onConfig={onConfig} />}
+      {(sc === 'deck-check' || sc === 'sweep') && st && <MulliganSection send={send} st={st} />}
       {sc === 'ready' && st && <Ready send={send} st={st} />}
       {sc === 'activate' && st && <Activate send={send} />}
     </div>
@@ -311,17 +312,18 @@ function MulliganSection({ send, st }: { send: (m: IsoToMain) => void; st: NonNu
   const running = s?.seq === 'mulligan' && !s.done && !s.error;
   const next = st.mulligans + 1;
   const bottom = config.value.freeFirstMulligan ? Math.max(0, next - 1) : next;
-  if (p.turnSeq > 1 && st.mulligans === 0 && !p.mulliganActive) return null; // game underway, no point offering
+  const blocked = !p.deckSubmitted ? 'Submit your deck first.' : p.mulliganActive && !p.decisionMade ? 'Keep your hand in edhplay first; then mulligan from here.' : null;
   return (
     <div class="hok-section">
       <p class="hok-h">Mulligan (Commander rules)</p>
       <div class="hok-muted">
         {st.mulligans === 0 ? 'Not happy with your hand? ' : `Mulligans taken: ${st.mulligans}. `}
-        Next mulligan: draw {config.value.handSize}{bottom > 0 ? `, then put ${bottom} on the bottom` : ' (free)'}.
+        Next mulligan: shuffle your hand in, draw {config.value.handSize}{bottom > 0 ? `, then put ${bottom} on the bottom` : ' (free)'}.
       </div>
+      {blocked && <div class="hok-note warn">{blocked}</div>}
       {running && <div class="hok-muted">{s?.step}</div>}
       {s?.seq === 'mulligan' && s.error && <div class="hok-note err">{s.error}</div>}
-      <button class="hok-btn secondary block sm" disabled={running} onClick={() => send({ type: 'cmd', cmd: 'mulligan' })}>
+      <button class="hok-btn secondary block sm" disabled={running || !!blocked} onClick={() => send({ type: 'cmd', cmd: 'mulligan' })}>
         Mulligan {next}
       </button>
     </div>
