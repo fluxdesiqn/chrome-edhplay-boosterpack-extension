@@ -1,0 +1,27 @@
+{
+  "name": "edhplay-heroes-of-kamigawa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that adds the Heroes of Kamigawa booster-pack mechanic to edhplay.com",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "data": "tsx scripts/build-set-data.ts",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@preact/signals": "^2.11.2",
+    "@types/chrome": "^0.2.9",
+    "@types/node": "^22.15.0",
+    "happy-dom": "^20.14.5",
+    "preact": "^10.29.8",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  }
+}

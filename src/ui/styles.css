@@ -1,0 +1,60 @@
+:host { all: initial; }
+* { box-sizing: border-box; }
+.hok-root {
+  position: fixed; right: 16px; bottom: 96px; z-index: 2147483000;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #e8e6f0;
+  width: 340px; max-height: min(80vh, 720px);
+  background: #1b1526; border: 1px solid #4a3a66; border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.hok-root.collapsed { width: auto; max-height: none; }
+.hok-header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: #2b1f3d; cursor: move; user-select: none;
+}
+.hok-title { font-weight: 600; flex: 1; letter-spacing: .2px; }
+.hok-badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #3d2e57; color: #d8c8ff; }
+.hok-badge.ok { background: #1f4d34; color: #b6f0cc; }
+.hok-badge.warn { background: #5a3a12; color: #ffd9a0; }
+.hok-badge.err { background: #5a1f24; color: #ffb3b8; }
+.hok-iconbtn { background: transparent; border: 0; color: #cfc6e0; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 6px; }
+.hok-iconbtn:hover { background: #3d2e57; }
+.hok-tabs { display: flex; gap: 2px; padding: 6px 8px 0; }
+.hok-tab { flex: 1; background: #24193a; border: 1px solid #3d2e57; border-bottom: 0; color: #bdb3d3; padding: 5px 0; cursor: pointer; border-radius: 6px 6px 0 0; font-size: 12px; }
+.hok-tab.active { background: #33264d; color: #fff; }
+.hok-body { padding: 10px; overflow: auto; flex: 1; }
+.hok-section { margin-bottom: 12px; }
+.hok-h { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: #a595c4; margin: 0 0 6px; }
+.hok-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.hok-muted { color: #9d93b3; }
+.hok-btn { background: #6b4bd1; border: 0; color: #fff; padding: 8px 12px; border-radius: 7px; cursor: pointer; font-weight: 600; font-size: 13px; }
+.hok-btn:hover { background: #7d5fe0; }
+.hok-btn:disabled { background: #3d3452; color: #8f86a4; cursor: not-allowed; }
+.hok-btn.secondary { background: #3d2e57; }
+.hok-btn.danger { background: #8a2f38; }
+.hok-btn.block { width: 100%; }
+.hok-btn.sm { padding: 5px 9px; font-size: 12px; font-weight: 500; }
+.hok-note { background: #24193a; border-left: 3px solid #6b4bd1; padding: 6px 8px; border-radius: 4px; margin: 6px 0; font-size: 12px; }
+.hok-note.warn { border-color: #d19a3a; }
+.hok-note.err { border-color: #d14b56; }
+.hok-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.hok-card { position: relative; border: 2px solid transparent; border-radius: 8px; overflow: hidden; cursor: pointer; background: #000; }
+.hok-card img { display: block; width: 100%; aspect-ratio: 488/680; object-fit: cover; }
+.hok-card.picked { border-color: #7dffb0; }
+.hok-card .hok-cap { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.7); font-size: 11px; padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hok-card .hok-tag { position: absolute; top: 4px; left: 4px; font-size: 10px; padding: 1px 5px; border-radius: 999px; background: rgba(0,0,0,.7); }
+.hok-sets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.hok-progress { height: 6px; background: #3d2e57; border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.hok-progress > div { height: 100%; background: #7dffb0; transition: width .2s; }
+.hok-list { margin: 0; padding: 0; list-style: none; }
+.hok-list li { padding: 3px 0; border-bottom: 1px dashed #33264d; display: flex; justify-content: space-between; gap: 8px; }
+.hok-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.hok-diag { max-height: 180px; overflow: auto; background: #120d1c; padding: 6px; border-radius: 6px; }
+.hok-diag div { padding: 1px 0; }
+.hok-diag .warn { color: #ffd9a0; }
+.hok-diag .error { color: #ffb3b8; }
+label.hok-check { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
+input.hok-input, select.hok-select { background: #120d1c; color: #fff; border: 1px solid #4a3a66; border-radius: 5px; padding: 4px 6px; font-size: 12px; }
+.hok-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; }

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Heroes of Kamigawa for EDHPlay",
+  "version": "0.1.0",
+  "description": "Open sealed Kamigawa boosters at the table: adds the Heroes of Kamigawa booster-pile mechanic to edhplay.com games.",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage"],
+  "host_permissions": ["https://edhplay.com/*", "https://api.edhplay.com/*", "https://api.scryfall.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    { "matches": ["https://edhplay.com/*"], "js": ["main-world.js"], "world": "MAIN", "run_at": "document_start" },
+    { "matches": ["https://edhplay.com/*"], "js": ["content.js"], "run_at": "document_start" }
+  ],
+  "commands": {
+    "toggle-panel": { "suggested_key": { "default": "Alt+K" }, "description": "Toggle the Heroes of Kamigawa panel" },
+    "open-activation": { "suggested_key": { "default": "Alt+Shift+K" }, "description": "Start a +2 activation" }
+  },
+  "icons": { "128": "icon128.png" }
+}
