@@ -824,7 +824,7 @@ export class Engine {
           front_image_uri: String(c.card.front_image_uri ?? ''),
         }));
       this.bridge.send({ type: 'mulligan-choose', hand, bottom, mulligans: n });
-      this.bridge.send({ type: 'seq', seq: 'mulligan', step: bottom ? `Choose ${bottom} card(s) for the bottom` : 'Free mulligan: keep all', pct: 0.8, done: bottom === 0 });
+      this.bridge.send({ type: 'seq', seq: 'mulligan', step: bottom ? `Choose ${bottom} card(s) for the bottom` : 'Free mulligan: keep all', pct: 1, done: true });
     } catch (err) {
       const text = this.lastServerError ? `edhplay refused: ${this.lastServerError}` : err instanceof Error ? err.message : String(err);
       this.diag('error', `mulligan failed: ${text}`);

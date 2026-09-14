@@ -3,7 +3,7 @@
  * The mulligan sequence driven directly (no Engine) against the FakeServer
  * through a FakeWs: zone index + echo waiter + paced sender, as the engine wires them.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActionSender } from '@main/actions';
 import { EchoWaiter } from '@main/echo';
 import { bottomCount, MulliganError, runMulliganBottom, runMulliganDraw, type MulliganDeps } from '@main/sequences/mulligan';
@@ -98,30 +98,31 @@ describe('runMulliganDraw', () => {
     expect(new Set(hand)).toEqual(new Set(ids(r.server.zone(P1, 'hand'))));
     expect(r.zones.cardsIn('library', P1)).toHaveLength(53);
 
-    // Stock gestures, in order: multi-select hand → Move to library (shuffle) → Draw 7.
-    expect(r.server.actionTypes(P1)).toEqual(['batch_move_cards', 'draw_x_cards']);
+    // Stock gestures, in order: hand → library bottom, Shuffle, Draw 7.
+    expect(r.server.actionTypes(P1)).toEqual(['batch_move_cards', 'shuffle_library', 'draw_x_cards']);
     const batch = r.server.actionsOf('batch_move_cards')[0]!;
-    expect(batch['shuffle']).toBe(true);
+    expect(batch['shuffle']).toBeUndefined();
     const items = batch['items'] as Array<{ id: string; zone: string; to: number }>;
     expect(items.map((i) => i.id)).toEqual(oldHand);
-    expect(items.every((i) => i.zone === 'library' && i.to === 0)).toBe(true);
+    expect(items.every((i) => i.zone === 'library' && i.to === -1)).toBe(true);
     expect(r.server.actionsOf('draw_x_cards')[0]).toMatchObject({ count: 7 });
-    // The batch echo said `shuffled`, so no extra shuffle was needed.
-    expect(r.frames.some((f) => f['type'] === 'cards_moved' && f['shuffled'] === true)).toBe(true);
   });
 
-  it('sends shuffle_library when the batch echo does not report a shuffle', async () => {
+  it('still draws when the shuffle echo never arrives (the hand sits on the bottom, so the draw is fresh)', async () => {
     const r = await rig();
-    // Strip `shuffled` from the echo before the sequence sees it.
+    const oldHand = ids(r.server.zone(P1, 'hand'));
     const raw = r.ws.serverEmit.bind(r.ws);
     r.ws.serverEmit = (obj: unknown) => {
       const f = typeof obj === 'string' ? (JSON.parse(obj) as Record<string, unknown>) : { ...(obj as Record<string, unknown>) };
-      delete f['shuffled'];
+      if (f['type'] === 'library_shuffled') return; // swallow the confirmation
       raw(f);
     };
-    await runMulliganDraw(r.deps);
+    r.server.options.noShuffle = true; // and the server does not actually shuffle either
+    const { hand } = await runMulliganDraw({ ...r.deps, stepTimeoutMs: 200 });
+    expect(hand).toHaveLength(7);
+    // Old hand went to the bottom of a 60-card library: none of it can be in the next 7.
+    expect(hand.some((id) => oldHand.includes(id))).toBe(false);
     expect(r.server.actionTypes(P1)).toEqual(['batch_move_cards', 'shuffle_library', 'draw_x_cards']);
-    expect(r.server.zone(P1, 'hand')).toHaveLength(7);
   });
 
   it('refuses an empty hand', async () => {

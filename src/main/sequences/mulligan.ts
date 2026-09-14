@@ -53,31 +53,37 @@ export async function runMulliganDraw(d: MulliganDeps): Promise<{ hand: string[]
   const handIds = d.zones.cardsIn('hand', d.me).map((c) => c.id);
   if (handIds.length === 0) throw new MulliganError('hand is empty');
 
-  // --- 1. Hand → library, shuffled (multi-select hand → Move to library → shuffle).
-  d.progress(`Shuffling ${handIds.length} cards into the library`, 0.1);
-  const moved = await step(
+  // --- 1. Hand → bottom of the library (multi-select hand → Move to library bottom).
+  // NOTE: edhplay's `shuffle` flag on batch_move_cards only shuffles the order of the
+  // moved cards among themselves before inserting them; it does NOT shuffle the library.
+  // Putting the hand on the bottom means a fresh draw even if the shuffle below were lost.
+  d.progress(`Returning ${handIds.length} cards to the library`, 0.1);
+  await step(
     d,
-    'shuffle hand into library',
+    'return hand to library',
     (f) => movedToLibrary(f, d.me, handIds),
-    () => send({ type: 'batch_move_cards', items: handIds.map((id) => ({ id, zone: 'library' as const, to: 0 })), shuffle: true }, `shuffle ${handIds.length} hand cards into library`),
+    () => send({ type: 'batch_move_cards', items: handIds.map((id) => ({ id, zone: 'library' as const, to: -1 })) }, `${handIds.length} hand cards → library bottom`),
     timeout,
   );
   abortIf();
 
-  // --- 2. Make sure the library really was shuffled.
-  if (moved['shuffled'] !== true) {
-    d.progress('Shuffling', 0.4);
-    const w = d.echo.waitForType('library_shuffled', (m) => m['player_id'] === d.me, timeout);
-    await send({ type: 'shuffle_library' });
-    await waitOrIgnore(w);
-    abortIf();
-  }
+  // --- 2. Really shuffle the library (library menu → Shuffle).
+  d.progress('Shuffling the library', 0.4);
+  const shuffled = await step(d, 'shuffle library', (f) => f['type'] === 'library_shuffled' && f['player_id'] === d.me, () => send({ type: 'shuffle_library' }), timeout).catch((err: unknown) => {
+    d.log('shuffle not confirmed; the hand is on the bottom so the draw is fresh anyway', String(err));
+    return null;
+  });
+  void shuffled;
+  abortIf();
 
   // --- 3. Draw the new hand.
   d.progress(`Drawing ${d.handSize}`, 0.6);
-  await step(d, `draw ${d.handSize}`, (f) => drewToHand(f, d.me, d.handSize), () => send({ type: 'draw_x_cards', count: d.handSize }), timeout);
+  const drew = await step(d, `draw ${d.handSize}`, (f) => drewToHand(f, d.me, d.handSize), () => send({ type: 'draw_x_cards', count: d.handSize }), timeout);
 
-  const hand = d.zones.cardsIn('hand', d.me).map((c) => c.id);
+  const echoIds = Array.isArray(drew['cards']) ? (drew['cards'] as Array<{ id?: unknown }>).map((c) => String(c.id ?? '')).filter(Boolean) : [];
+  const hand = echoIds.length === d.handSize ? echoIds : d.zones.cardsIn('hand', d.me).map((c) => c.id);
+  const same = hand.length === handIds.length && hand.every((id) => handIds.includes(id));
+  if (same) d.log('warning: the new hand has the same cards as the old one');
   d.log(`mulligan draw: ${hand.length} cards in hand`);
   d.progress('Choose cards for the bottom', 1);
   return { hand };

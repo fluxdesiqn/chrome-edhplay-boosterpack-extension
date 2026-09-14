@@ -28,6 +28,7 @@ describe('mulligan', () => {
     expect(server.zone(P1, 'hand')).toHaveLength(7);
     expect(server.zone(P1, 'hand').some((c) => c.name === 'Wastes')).toBe(false);
     const libBefore = server.zone(P1, 'library').length;
+    const firstHand = server.zone(P1, 'hand').map((c) => c.id);
 
     // Mulligan 1: free.
     w.send({ type: 'cmd', cmd: 'mulligan' });
@@ -36,12 +37,18 @@ describe('mulligan', () => {
     expect(c1.mulligans).toBe(1);
     expect(c1.bottom).toBe(0);
     expect(c1.hand).toHaveLength(7);
+    // A real mulligan: the hand is re-drawn from a shuffled library, not the same seven put back on top.
+    expect(new Set(c1.hand.map((c) => c.id))).not.toEqual(new Set(firstHand));
+    expect(new Set(c1.hand.map((c) => c.id))).toEqual(new Set(server.zone(P1, 'hand').map((c) => c.id)));
     expect(server.zone(P1, 'library')).toHaveLength(libBefore);
-    expect(server.log.some((e) => e.msg['type'] === 'batch_move_cards' && e.msg['shuffle'] === true)).toBe(true);
+    // The chooser must be usable immediately (the sequence is complete until the player picks).
+    expect(w.iso.of('seq').filter((s) => s.seq === 'mulligan').at(-1)?.done).toBe(true);
+    const batch = server.log.find((e) => e.msg['type'] === 'batch_move_cards' && (e.msg['items'] as Array<{ to: number }>).every((i) => i.to === -1));
+    expect(batch).toBeDefined();
+    expect(server.log.some((e) => e.msg['type'] === 'shuffle_library')).toBe(true);
     expect(server.log.some((e) => e.msg['type'] === 'draw_x_cards' && e.msg['count'] === 7)).toBe(true);
     w.send({ type: 'cmd', cmd: 'mulligan-bottom', ids: [] });
-    await until(() => w.iso.of('seq').some((s) => s.seq === 'mulligan' && s.done), 'mulligan 1 done');
-    expect(w.iso.state()!.mulligans).toBe(1);
+    await until(() => w.iso.state()?.mulligans === 1, 'mulligan 1 recorded');
 
     // Mulligan 2: one card to the bottom.
     w.send({ type: 'cmd', cmd: 'mulligan' });
@@ -54,7 +61,7 @@ describe('mulligan', () => {
     await until(() => server.zone(P1, 'hand').length === 6, 'card bottomed');
     const lib = server.zone(P1, 'library');
     expect(lib[lib.length - 1]!.id).toBe(victim);
-    expect(w.iso.state()!.mulligans).toBe(2);
+    await until(() => w.iso.state()?.mulligans === 2, 'mulligan 2 recorded');
     // The reservoir was never touched by mulligans.
     expect(w.iso.state()!.reservoir).toHaveLength(50);
     expect(server.zone(P1, 'exile')).toHaveLength(50);

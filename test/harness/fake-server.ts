@@ -57,7 +57,7 @@ export class FakeServer {
    * player whose stock mulligan decision is still pending (false by default so
    * scenarios written before the gate keep working; call `keepHand()` first when on).
    */
-  readonly options = { rejectReorder: false, handSize: 7, mulliganGate: true };
+  readonly options = { rejectReorder: false, handSize: 7, mulliganGate: true, noShuffle: false };
 
   turnSeq = 1;
   mulliganPhaseActive = false;
@@ -321,11 +321,13 @@ export class FakeServer {
           moved.push(taken.card);
         }
         for (const c of moved) c.zone = toZone;
-        z[toZone] = bottom ? [...z[toZone], ...moved] : [...moved, ...z[toZone]];
-        const shuffled = msg['shuffle'] === true && toZone === 'library';
-        if (shuffled) z.library = this.shuffle(z.library);
-        const base = { type: 'cards_moved', player_id: pid, to_zone: toZone, from_zone: fromZone, card_ids: moved.map((c) => c.id), count: moved.length, position: bottom ? -1 : 0, ...(shuffled ? { shuffled: true } : {}) };
-        this.broadcast((viewer) => (viewer !== pid && HIDDEN.includes(toZone) ? base : { ...base, cards: moved }));
+        // Live semantics (verified in edhplay's simulator): `shuffle` only shuffles the moved
+        // items among themselves before inserting; the rest of the library keeps its order.
+        const shuffled = msg['shuffle'] === true && (toZone === 'library' || toZone === 'hand');
+        const inserted = shuffled ? this.shuffle(moved) : moved;
+        z[toZone] = bottom ? [...z[toZone], ...inserted] : [...inserted, ...z[toZone]];
+        const base = { type: 'cards_moved', player_id: pid, to_zone: toZone, from_zone: fromZone, card_ids: inserted.map((c) => c.id), count: inserted.length, position: bottom ? -1 : 0, ...(shuffled ? { shuffled: true } : {}) };
+        this.broadcast((viewer) => (viewer !== pid && HIDDEN.includes(toZone) ? base : { ...base, cards: inserted }));
         return;
       }
 
@@ -395,7 +397,7 @@ export class FakeServer {
       }
 
       case 'shuffle_library':
-        z.library = this.shuffle(z.library);
+        if (!this.options.noShuffle) z.library = this.shuffle(z.library);
         this.broadcast(() => ({ type: 'library_shuffled', player_id: pid }));
         return;
 
