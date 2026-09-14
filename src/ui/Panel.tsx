@@ -439,7 +439,11 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
   const [set, setSet] = useState<SetCode>(config.value.defaultSet);
   const [kind, setKind] = useState<PackKind>('draft');
   useEffect(() => requestSetList(), []);
-  const loading = seq.value?.seq === 'activate' && /Loading/.test(seq.value.step) && !seq.value.error;
+  const loading = seq.value?.seq === 'activate' && /Loading/.test(seq.value.step) && !seq.value.error && !seq.value.done;
+  const randomSet = (): SetCode => {
+    const pool = (setList.value && setList.value.length ? setList.value.map((s2) => s2.code) : [...SET_CODES]) as SetCode[];
+    return pool[Math.floor(Math.random() * pool.length)]!;
+  };
   return (
     <div class="hok-section">
       <p class="hok-h">{st.mode === 'deck' ? 'Open a booster into your second deck' : 'Open up to one sealed booster'}</p>
@@ -450,6 +454,7 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
         kind={kind}
         onChange={(s2, k) => { setSet(s2); setKind(k); }}
         onRefresh={() => { setList.value = null; setListLoader.load?.(); }}
+        onRandom={() => { setSet(randomSet()); setKind('draft'); }}
         error={setListError.value}
       />
       {st.mode === 'heroes' && !SET_CODES.includes(set as never) && (
@@ -459,6 +464,10 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
       <div style={{ height: 8 }} />
       <button class="hok-btn block" disabled={loading} onClick={() => send({ type: 'cmd', cmd: 'activate', set, kind })}>
         {loading ? 'Loading card list…' : `Open ${packLabel(set, kind)}`}
+      </button>
+      <div style={{ height: 6 }} />
+      <button class="hok-btn secondary block sm" disabled={loading} onClick={() => { const r = randomSet(); setSet(r); setKind('draft'); send({ type: 'cmd', cmd: 'activate', set: r, kind: 'draft' }); }}>
+        🎲 Open a random pack
       </button>
       {st.mode === 'heroes' && (
         <div>

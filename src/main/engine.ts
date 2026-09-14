@@ -770,6 +770,7 @@ export class Engine {
     }
     registerSetData(data);
     this.diag('info', `loaded ${data.name}: ${data.cards.length} cards`);
+    this.bridge.send({ type: 'seq', seq: 'activate', step: `Loaded ${data.name}`, pct: 1, done: true });
     const reveals = this.pendingReveals.filter((p) => p.pack.set === set);
     this.pendingReveals = this.pendingReveals.filter((p) => p.pack.set !== set);
     for (const r of reveals) {

@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { SetSummary } from '@shared/packs/runtime';
-import { PACK_KINDS, PACK_KIND_NAMES, SET_CODES, SET_NAMES, availablePacks, isBundledSet, setName, type PackKind } from '@shared/packs/types';
+import { PACK_KINDS, SET_CODES, SET_NAMES, availablePacks, isBundledSet, kindName, setName, type PackKind } from '@shared/packs/types';
 
 export interface SetPickerProps {
   /** null = still loading */
@@ -14,6 +14,8 @@ export interface SetPickerProps {
   onChange: (set: string, kind: PackKind) => void;
   /** reload the set list */
   onRefresh?: () => void;
+  /** pick a random set from the list */
+  onRandom?: () => void;
   error?: string;
 }
 
@@ -39,7 +41,8 @@ function yearOf(released: string): string {
 
 /** Bundled sets, recent chips and a searchable list of every Scryfall set, plus the booster-kind pills. */
 export function SetPicker(props: SetPickerProps): JSX.Element {
-  const { sets, recent, value, kind, onChange, onRefresh, error } = props;
+  const { sets, recent, value, kind, onChange, onRefresh, onRandom, error } = props;
+  const releasedOf = (code: string): string | undefined => sets?.find((s) => s.code === code)?.released;
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
 
@@ -180,6 +183,13 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
         )}
       </div>
 
+      {onRandom && (
+        <div class="hok-sp-block">
+          <button type="button" class="hok-btn secondary block sm" disabled={!sets || sets.length === 0} onClick={onRandom} title="Pick a random set from the whole list">
+            🎲 Random set
+          </button>
+        </div>
+      )}
       <div class="hok-sp-block">
         <p class="hok-h">Booster</p>
         <div class="hok-kinds hok-sp-kinds">
@@ -191,10 +201,10 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
                 class={`hok-pillbtn ${effectiveKind === k ? 'selected' : ''}`}
                 disabled={!ok}
                 aria-pressed={effectiveKind === k}
-                title={ok ? '' : `${nameOf(value)} was not sold as ${PACK_KIND_NAMES[k]}s`}
+                title={ok ? '' : `${nameOf(value)} was not sold as ${kindName(value, k, releasedOf(value))}s`}
                 onClick={() => onChange(value, k)}
               >
-                {PACK_KIND_NAMES[k]}
+                {kindName(value, k, releasedOf(value))}
               </button>
             );
           })}

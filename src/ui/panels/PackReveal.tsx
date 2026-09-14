@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { OfferCard } from '@shared/bridge-contract';
-import { PACK_KIND_NAMES, type PackKind, type SetCode, packLabel, setName } from '@shared/packs/types';
+import { type PackKind, type SetCode, kindName, packLabel, setName } from '@shared/packs/types';
 
 export interface PackRevealProps {
   /** "you" when isOwner */
@@ -111,7 +111,7 @@ export function PackReveal(props: PackRevealProps): JSX.Element | null {
           <div class="hok-reveal-tear" />
           <div class="hok-reveal-wrapper-body">
             <span>{setName(set)}</span>
-            <span class="hok-reveal-kind">{PACK_KIND_NAMES[kind]}</span>
+            <span class="hok-reveal-kind">{kindName(set, kind)}</span>
           </div>
         </div>
       ) : (

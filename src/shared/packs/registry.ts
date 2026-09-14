@@ -13,7 +13,7 @@
  */
 import { SET_DATA } from './data';
 import type { RuntimeSetData } from './runtime';
-import { type CardRef, type PackCard, type SetCode, type SetData, isBundledSet, parseRef, registerSetName } from './types';
+import { type CardRef, type PackCard, type SetCode, type SetData, isBundledSet, parseRef, registerSetInfo, registerSetName } from './types';
 
 export type AnySetData = SetData | RuntimeSetData;
 
@@ -89,6 +89,7 @@ export function registerSetData(data: RuntimeSetData): void {
   }
   runtimeSets.set(data.code, data);
   registerSetName(data.code, data.name);
+  registerSetInfo(data.code, { playBooster: data.packSize === 14 });
   rebuildIdIndex();
   indexCache.delete(data.code);
   notify();

@@ -41,8 +41,25 @@ export function registerSetName(set: SetCode, name: string): void {
 export function setName(set: SetCode): string {
   return isBundledSet(set) ? SET_NAMES[set] : (runtimeSetNames.get(set) ?? set.toUpperCase());
 }
+/** Sets from February 2024 on were sold as Play Boosters (14 cards) instead of Draft Boosters. */
+export const PLAY_BOOSTER_FROM = '2024-02-01';
+const runtimeSetInfo = new Map<string, { playBooster: boolean }>();
+export function registerSetInfo(set: SetCode, info: { playBooster: boolean }): void {
+  runtimeSetInfo.set(set, info);
+}
+export function isPlayBoosterSet(set: SetCode, released?: string): boolean {
+  if (isBundledSet(set)) return false;
+  const info = runtimeSetInfo.get(set);
+  if (info) return info.playBooster;
+  return !!released && released >= PLAY_BOOSTER_FROM;
+}
+/** The booster name a player would recognise: the draft-style pack is a "Play Booster" for modern sets. */
+export function kindName(set: SetCode, kind: PackKind, released?: string): string {
+  if (kind === 'draft') return isPlayBoosterSet(set, released) ? 'Play Booster' : 'Draft Booster';
+  return PACK_KIND_NAMES[kind];
+}
 export function packLabel(set: SetCode, kind: PackKind): string {
-  return `${setName(set)} ${PACK_KIND_NAMES[kind]}`;
+  return `${setName(set)} ${kindName(set, kind)}`;
 }
 
 /** Alternate-frame printing kinds: showcase, borderless, extended art, foil-etched / neon ink. */
