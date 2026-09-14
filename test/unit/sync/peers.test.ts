@@ -56,7 +56,7 @@ describe('applySync', () => {
     expect(r2.peers.alice!.reservoirCount).toBe(4);
   });
 
-  it('pack dedupes by n per sender and keeps cards empty', () => {
+  it('pack dedupes by n per sender and defaults kind/cards/foil', () => {
     const pack = (n: number, seed = `s${n}`): SyncMessage => ({ t: 'pack', n, set: 'neo', seed, dv: 'dvX' });
     let peers: Record<string, PeerView> = {};
     peers = applySync(peers, from('alice', pack(2)), ctx()).peers;
@@ -67,8 +67,8 @@ describe('applySync', () => {
     peers = applySync(peers, from('bob', pack(1)), ctx()).peers;
 
     expect(peers.alice!.packs).toEqual([
-      { n: 1, set: 'neo', seed: 's1', dataVersion: 'dvX', cards: [] },
-      { n: 2, set: 'neo', seed: 's2', dataVersion: 'dvX', cards: [] },
+      { n: 1, set: 'neo', kind: 'draft', seed: 's1', dataVersion: 'dvX', cards: [], foil: [] },
+      { n: 2, set: 'neo', kind: 'draft', seed: 's2', dataVersion: 'dvX', cards: [], foil: [] },
     ]);
     expect(peers.bob!.packs).toHaveLength(1);
   });

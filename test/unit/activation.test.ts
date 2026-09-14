@@ -7,13 +7,19 @@ import {
   openPack,
   pendingMoves,
   pickCards,
+  shufflePackIn,
 } from '@shared/game/activation';
 import { emptyGameState, type HokGameState } from '@shared/state';
-import type { CardRef, RolledPack, SetCode } from '@shared/packs/types';
+import type { CardRef, PackKind, RolledPack, SetCode } from '@shared/packs/types';
 
 const refs = (n: number, set = 'neo'): CardRef[] => Array.from({ length: n }, (_, i) => `${set}:${i + 1}` as CardRef);
 
-const roll = (set: SetCode): RolledPack => ({ set, seed: 'abcd', dataVersion: 'dv', cards: refs(15, set) });
+const roll = (set: SetCode, kind: PackKind = 'draft'): RolledPack => ({ set, kind, seed: 'abcd', dataVersion: 'dv', cards: refs(15, set), foil: [] });
+/** open + shuffle in one go for tests that do not care about the reveal */
+const open = (s: HokGameState, set: SetCode | null) => {
+  const r = openPack(s, set, roll, shuffleInto);
+  return set ? shufflePackIn(r.state, shuffleInto) : r;
+};
 const shuffleInto = (pile: CardRef[], pack: CardRef[]) => [...pack, ...pile]; // deterministic for tests
 
 function ready(): HokGameState {
@@ -30,15 +36,32 @@ describe('activation state machine', () => {
     expect(beginActivation(s, 1).error).toMatch(/sweep/);
   });
 
-  it('rolls a pack, publishes it, and shows the top four', () => {
+  it('rolls a pack, publishes it, stops at the reveal, then shuffles in and shows the top four', () => {
     let r = beginActivation(ready(), 3);
-    r = openPack(r.state, 'neo', roll, shuffleInto);
+    r = openPack(r.state, 'neo', roll, shuffleInto, 'collector');
     expect(r.error).toBeUndefined();
     expect(r.effects.some((e) => e.kind === 'chat-pack')).toBe(true);
+    expect(r.state.activation?.phase).toBe('rolled');
+    expect(r.state.activation?.pack?.kind).toBe('collector');
+    expect(r.state.pile).toHaveLength(0); // not shuffled in yet
+    expect(r.state.packs[0]?.n).toBe(1);
+    expect(pickCards(r.state, [0, 1]).error).toMatch(/not viewing/);
+    r = shufflePackIn(r.state, shuffleInto);
+    expect(r.effects.some((e) => e.kind === 'chat-shuffled' && e.n === 1)).toBe(true);
     expect(r.state.activation?.phase).toBe('viewing');
     expect(r.state.activation?.look).toEqual(refs(4));
     expect(r.state.pile).toHaveLength(11);
-    expect(r.state.packs[0]?.n).toBe(1);
+  });
+
+  it('cancel during the reveal discards the pack record and leaves the pile untouched', () => {
+    const base = ready();
+    base.pile = refs(3, 'bok');
+    let r = beginActivation(base, 3);
+    r = openPack(r.state, 'neo', roll, shuffleInto);
+    r = cancelActivation(r.state);
+    expect(r.state.pile).toEqual(refs(3, 'bok'));
+    expect(r.state.packs).toHaveLength(0);
+    expect(r.state.activation).toBeNull();
   });
 
   it('"no pack" with an empty pile resolves with no effect', () => {
@@ -51,7 +74,7 @@ describe('activation state machine', () => {
 
   it('picks two to hand, rest to graveyard, announcing graveyard pairs first', () => {
     let r = beginActivation(ready(), 3);
-    r = openPack(r.state, 'chk', roll, shuffleInto);
+    r = open(r.state, 'chk');
     r = pickCards(r.state, [0, 2]);
     expect(r.error).toBeUndefined();
     const a = r.state.activation!;
@@ -73,7 +96,7 @@ describe('activation state machine', () => {
 
   it('rejects a wrong pick count', () => {
     let r = beginActivation(ready(), 3);
-    r = openPack(r.state, 'chk', roll, shuffleInto);
+    r = open(r.state, 'chk');
     expect(pickCards(r.state, [0]).error).toMatch(/exactly 2/);
     expect(pickCards(r.state, [0, 1, 2]).error).toMatch(/exactly 2/);
     // duplicates collapse: [0,0,1] is a valid pick of 0 and 1
@@ -82,7 +105,7 @@ describe('activation state machine', () => {
 
   it('completes when all moves are observed and counts the activation', () => {
     let r = beginActivation(ready(), 3);
-    r = openPack(r.state, 'chk', roll, shuffleInto);
+    r = open(r.state, 'chk');
     r = pickCards(r.state, [1, 3]);
     let s = r.state;
     expect(pendingMoves(s)).toHaveLength(4);
@@ -97,7 +120,7 @@ describe('activation state machine', () => {
 
   it('ignores an observation into the wrong zone', () => {
     let r = beginActivation(ready(), 3);
-    r = openPack(r.state, 'chk', roll, shuffleInto);
+    r = open(r.state, 'chk');
     r = pickCards(r.state, [0, 1]);
     const m = r.state.activation!.moves[0]!;
     const out = markMoveDone(r.state, m.blankId, m.zone === 'hand' ? 'graveyard' : 'hand');
@@ -109,7 +132,7 @@ describe('activation state machine', () => {
     const s = ready();
     s.reservoir = s.reservoir.slice(0, 2);
     let r = beginActivation(s, 3);
-    r = openPack(r.state, 'sok', roll, shuffleInto);
+    r = open(r.state, 'sok');
     expect(pickCards(r.state, [0, 1]).error).toMatch(/need 4 blanks/);
     r = lookFewer(r.state);
     expect(r.state.activation?.look).toEqual(refs(2, 'sok'));
@@ -123,7 +146,7 @@ describe('activation state machine', () => {
     const base = ready();
     base.pile = refs(3, 'bok');
     let r = beginActivation(base, 3);
-    r = openPack(r.state, 'neo', roll, shuffleInto);
+    r = open(r.state, 'neo');
     r = cancelActivation(r.state);
     expect(r.state.pile).toEqual(refs(3, 'bok'));
     expect(r.state.packs).toHaveLength(0);

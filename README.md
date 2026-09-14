@@ -17,7 +17,7 @@ Every player in the pod installs the extension. Anyone without it sees Wastes an
 1. **Deck**: add Heroes of Kamigawa as your commander (it is in edhplay's database) and put **50 copies of Wastes** in the main deck. If your deck genuinely plays Wastes, use 50 copies of another basic instead; the extension picks whichever basic land has 50 or more copies.
 2. **Room**: create the game as **Free Commander** (40–200 card decks). Standard Commander rooms enforce exactly 100 cards.
 3. **Game start**: after decks are submitted and before you keep or mulligan, open the panel (bottom-right, or `Alt+K`) and press **Sweep**. It moves all 50 blanks face-down into your exile zone and refills your hand. Optionally enable auto-sweep.
-4. **Activating +2**: press **+2: Open a pack**, choose a set (Champions, Betrayers, Saviors, Neon Dynasty). The pack seed is published in chat before you look, so anyone with the extension can verify the roll. Pick two of the top four for your hand; the other two go to your graveyard.
+4. **Activating +2**: press **+2: Choose a pack**, pick a set (Champions, Betrayers, Saviors, Neon Dynasty) and a booster type. Neon Dynasty comes as Draft, Set or Collector boosters; the original block was Draft only. The pack is rolled and its contents are published in chat before you look, so everyone with the extension sees the same pack-opening reveal on their screen and can verify the roll. Press **Shuffle into booster pile** when everyone has seen it, then pick two of the top four for your hand; the other two go to your graveyard.
 5. **Casting** a pack card from hand: just drag it to the battlefield as usual. The extension announces its identity first, so everyone sees the real card.
 6. **−3** is manual: drag the creature from graveyard to battlefield. The panel lists eligible cards.
 7. The static cost reduction is bookkeeping you do yourself, as in paper.
@@ -69,4 +69,4 @@ edhplay's terms forbid manipulating game state through means the interface does 
 - One booster mechanic only; no other Heroes of the Realm cards.
 - Token copies of a re-skinned card are created as a real-card token via the sideboard path, without copied counters.
 - Chat lines starting with `[HoK1]` are visible to players without the extension.
-- Pack collation is an approximation: foils are ignored; Neon Dynasty land slot is 50/50 dual vs ukiyo-e basic, flex slot is 1/3 uncommon, mythic 10/74.
+- Pack collation is an approximation of the printed sheets: Draft boosters ignore foils; Neon Dynasty land slot is 50/50 dual vs ukiyo-e basic, flex slot is 1/3 uncommon, mythic 10/74. Set and Collector boosters follow the official slot structure (showcase, borderless, extended art, foil-etched printings, 21% foil land in Set boosters) with fixed odds where Wizards only published ranges. Foils are cosmetic in the reveal.

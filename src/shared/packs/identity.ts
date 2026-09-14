@@ -15,6 +15,7 @@ function indexFor(set: SetCode): Map<string, PackCard> {
     const data = SET_DATA[set];
     for (const c of data.cards) idx.set(c.cn, c);
     for (const c of data.basics ?? []) if (!idx.has(c.cn)) idx.set(c.cn, c);
+    for (const c of data.variants ?? []) if (!idx.has(c.cn)) idx.set(c.cn, c);
     indexCache.set(set, idx);
   }
   return idx;
@@ -28,6 +29,28 @@ export function findCard(ref: CardRef | string): PackCard | null {
 
 export function cardsInSet(set: SetCode): PackCard[] {
   return SET_DATA[set].cards;
+}
+
+/**
+ * NEO's only neon-ink printings are the three Hidetsugu, Devouring Chaos
+ * collector-booster variants; every other `v: 'x'` printing is foil-etched showcase.
+ */
+const NEON_INK_NAME = 'Hidetsugu, Devouring Chaos';
+
+/** Human label for an alternate-frame printing, or null for a regular one. */
+export function variantLabel(card: PackCard): string | null {
+  switch (card.v) {
+    case 's':
+      return 'Showcase';
+    case 'b':
+      return 'Borderless';
+    case 'e':
+      return 'Extended art';
+    case 'x':
+      return card.name === NEON_INK_NAME ? 'Neon ink' : 'Foil etched';
+    default:
+      return null;
+  }
 }
 
 const RARITY_WORD: Record<Rarity, string> = { c: 'common', u: 'uncommon', r: 'rare', m: 'mythic' };

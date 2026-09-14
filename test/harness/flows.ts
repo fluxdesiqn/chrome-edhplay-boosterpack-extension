@@ -1,5 +1,5 @@
 /** Reusable multi-step flows so each scenario reads as a short script. */
-import type { SetCode } from '@shared/packs/types';
+import type { PackKind, SetCode } from '@shared/packs/types';
 import type { HokGameState } from '@shared/state';
 import { buildDeck, type DeckSpec } from './deck';
 import type { FakeServer } from './fake-server';
@@ -28,10 +28,15 @@ export async function sweep(world: World): Promise<HokGameState> {
   return world.iso.state()!;
 }
 
-/** `cmd activate` (a set or null), then wait for the offer. Returns the offer message. */
-export async function activate(world: World, set: SetCode | null) {
+/** `cmd activate` (a set or null); with a set, wait for the reveal then shuffle in; then wait for the offer. */
+export async function activate(world: World, set: SetCode | null, kind: PackKind = 'draft') {
   const before = world.iso.of('offer').length;
-  world.send({ type: 'cmd', cmd: 'activate', set });
+  const revealsBefore = world.iso.of('reveal').length;
+  world.send({ type: 'cmd', cmd: 'activate', set, kind });
+  if (set) {
+    await until(() => world.iso.of('reveal').length > revealsBefore, 'reveal');
+    world.send({ type: 'cmd', cmd: 'shuffle-in' });
+  }
   await until(() => world.iso.of('offer').length > before, 'offer');
   return world.iso.offer()!;
 }

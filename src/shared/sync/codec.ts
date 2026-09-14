@@ -1,5 +1,5 @@
-import { SET_CODES, parseRef } from '../packs/types';
-import type { CardRef, SetCode } from '../packs/types';
+import { PACK_KINDS, SET_CODES, parseRef } from '../packs/types';
+import type { CardRef, PackKind, SetCode } from '../packs/types';
 import {
   SYNC_MAX_CHARS,
   SYNC_MAX_MAP_PAIRS,
@@ -118,10 +118,28 @@ function validateSync(raw: unknown): SyncMessage | null {
       return { t: 'state', ph, res, pile, act, dv };
     }
     case 'pack': {
-      const { n, set, seed, dv } = raw;
+      const { n, set, seed, dv, k, c, f } = raw;
       if (!isFiniteNumber(n) || !isString(seed) || !isString(dv)) return null;
       if (!isString(set) || !(SET_CODES as readonly string[]).includes(set)) return null;
-      return { t: 'pack', n, set: set as SetCode, seed, dv };
+      const out: Extract<SyncMessage, { t: 'pack' }> = { t: 'pack', n, set: set as SetCode, seed, dv };
+      if (k !== undefined) {
+        if (!isString(k) || !(PACK_KINDS as readonly string[]).includes(k)) return null;
+        out.k = k as PackKind;
+      }
+      if (c !== undefined) {
+        if (!Array.isArray(c) || !c.every((x) => isString(x) && parseRef(x) !== null)) return null;
+        out.c = c as CardRef[];
+      }
+      if (f !== undefined) {
+        if (!Array.isArray(f) || !f.every((x) => isFiniteNumber(x) && x >= 0)) return null;
+        out.f = f as number[];
+      }
+      return out;
+    }
+    case 'shuf': {
+      const { n } = raw;
+      if (!isFiniteNumber(n)) return null;
+      return { t: 'shuf', n };
     }
     case 'map': {
       if (!isPairArray(raw.m)) return null;

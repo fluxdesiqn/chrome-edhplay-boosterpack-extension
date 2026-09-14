@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Layout, PackCard, Rarity, SetCode, SetData } from '../src/shared/packs/types';
+import type { Layout, PackCard, Rarity, SetCode, SetData, Variant } from '../src/shared/packs/types';
 import { SET_CODES, SET_NAMES } from '../src/shared/packs/types';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -114,6 +114,13 @@ interface ScryCard {
   cmc?: number;
   color_identity?: string[];
   card_faces?: ScryFace[];
+  frame_effects?: string[];
+  border_color?: string;
+  finishes?: string[];
+  promo_types?: string[];
+  digital?: boolean;
+  promo?: boolean;
+  booster?: boolean;
 }
 
 interface ScrySearchPage {
@@ -179,6 +186,46 @@ function toPackCard(card: ScryCard): PackCard | null {
   if (card.cmc !== undefined) out.cmc = card.cmc;
   if (card.color_identity) out.ci = card.color_identity;
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// NEO collector-booster-only printings (showcase / borderless / extended / etched)
+// ---------------------------------------------------------------------------
+
+/**
+ * Promo types that match `-is:booster` but were never in Collector Boosters:
+ * Alchemy rebalanced digital cards, bundle / buy-a-box / promo-pack / WPN promos
+ * and the 2023 "Phyrexia: All Will Be One" set-extension Jin-Gitaxias concept art.
+ */
+const NON_COLLECTOR_PROMO_TYPES = new Set([
+  'rebalanced',
+  'alchemy',
+  'bundle',
+  'buyabox',
+  'promopack',
+  'prerelease',
+  'wizardsplaynetwork',
+  'setextension',
+  'stepandcompleat',
+]);
+
+function isCollectorPrinting(card: ScryCard): boolean {
+  if (card.digital || card.promo) return false;
+  if (card.collector_number.startsWith('A-')) return false;
+  for (const t of card.promo_types ?? []) if (NON_COLLECTOR_PROMO_TYPES.has(t)) return false;
+  return true;
+}
+
+/** Variant kind with precedence x > b > s > e (a neon-ink borderless is still 'x'). */
+function variantOf(card: ScryCard): Variant | null {
+  const fx = card.frame_effects ?? [];
+  const finishes = card.finishes ?? [];
+  const promos = card.promo_types ?? [];
+  if (finishes.includes('etched') || promos.includes('neonink')) return 'x';
+  if (card.border_color === 'borderless') return 'b';
+  if (fx.includes('showcase')) return 's';
+  if (fx.includes('extendedart')) return 'e';
+  return null;
 }
 
 function cnCompare(a: PackCard, b: PackCard): number {
@@ -277,7 +324,13 @@ async function resolveEdhplay(card: PackCard, setName: string): Promise<Resoluti
 // main
 // ---------------------------------------------------------------------------
 
-async function buildSet(code: SetCode): Promise<{ data: SetData; stats: Record<Resolution, number> }> {
+interface BuildResult {
+  data: SetData;
+  stats: Record<Resolution, number>;
+  variantStats?: Record<Resolution, number>;
+}
+
+async function buildSet(code: SetCode): Promise<BuildResult> {
   console.log(`\n== ${code} ==`);
   const meta = await scryfallSet(code);
   const raw = await scryfallSearch(`set:${code}+is:booster+-t:basic`);
@@ -291,21 +344,55 @@ async function buildSet(code: SetCode): Promise<{ data: SetData; stats: Record<R
     console.log(`  scryfall: ${basics.length} basics`);
   }
 
-  const stats: Record<Resolution, number> = { exact: 0, any: 0, none: 0 };
-  const all = [...cards, ...(basics ?? [])];
-  let done = 0;
-  for (const card of all) {
-    const r = await resolveEdhplay(card, meta.name);
-    stats[r]++;
-    if (r === 'none') console.warn(`  ? unresolved: ${card.name} (${code}:${card.cn})`);
-    done++;
-    if (done % 50 === 0) console.log(`  edhplay: ${done}/${all.length}`);
+  let variants: PackCard[] | undefined;
+  if (code === 'neo') {
+    const rawVariants = await scryfallSearch(`set:${code}+-is:booster+-t:basic`);
+    const kept = rawVariants.filter(isCollectorPrinting);
+    variants = [];
+    const byKind: Record<Variant, number> = { s: 0, b: 0, e: 0, x: 0 };
+    for (const raw of kept) {
+      const v = variantOf(raw);
+      if (!v) {
+        console.warn(`  ? non-booster printing with no variant kind, skipped: ${raw.name} (${code}:${raw.collector_number})`);
+        continue;
+      }
+      const card = toPackCard(raw);
+      if (!card) continue;
+      card.v = v;
+      card.co = true;
+      variants.push(card);
+      byKind[v]++;
+    }
+    variants.sort(cnCompare);
+    console.log(
+      `  scryfall: ${rawVariants.length} non-booster printings, ${rawVariants.length - kept.length} promo/digital dropped, ${variants.length} variants kept` +
+        ` (showcase=${byKind.s} borderless=${byKind.b} extended=${byKind.e} etched/neon=${byKind.x})`,
+    );
   }
-  console.log(`  edhplay: exact=${stats.exact} any-print=${stats.any} unresolved=${stats.none}`);
+
+  const resolveAll = async (list: PackCard[], label: string): Promise<Record<Resolution, number>> => {
+    const stats: Record<Resolution, number> = { exact: 0, any: 0, none: 0 };
+    let done = 0;
+    for (const card of list) {
+      const r = await resolveEdhplay(card, meta.name);
+      stats[r]++;
+      if (r === 'none') console.warn(`  ? unresolved ${label}: ${card.name} (${code}:${card.cn})`);
+      done++;
+      if (done % 50 === 0) console.log(`  edhplay ${label}: ${done}/${list.length}`);
+    }
+    console.log(`  edhplay ${label}: exact=${stats.exact} any-print=${stats.any} unresolved=${stats.none}`);
+    return stats;
+  };
+
+  const stats = await resolveAll([...cards, ...(basics ?? [])], 'cards');
+  const variantStats = variants ? await resolveAll(variants, 'variants') : undefined;
 
   const data: SetData = { code, name: meta.name, released: meta.released_at, cards };
   if (basics) data.basics = basics;
-  return { data, stats };
+  if (variants) data.variants = variants;
+  const out: BuildResult = { data, stats };
+  if (variantStats) out.variantStats = variantStats;
+  return out;
 }
 
 async function main(): Promise<void> {
@@ -313,13 +400,20 @@ async function main(): Promise<void> {
   const sets: SetData[] = [];
   const summary: string[] = [];
   for (const code of SET_CODES) {
-    const { data, stats } = await buildSet(code);
+    const { data, stats, variantStats } = await buildSet(code);
     sets.push(data);
     writeFileSync(join(OUT_DIR, `${code}.json`), JSON.stringify(data));
     const n = data.cards.length + (data.basics?.length ?? 0);
     summary.push(
       `${code}: ${data.cards.length} cards${data.basics ? ` + ${data.basics.length} basics` : ''}; edhplay exact=${stats.exact} any-print=${stats.any} unresolved=${stats.none} (of ${n})`,
     );
+    if (data.variants && variantStats) {
+      const by = (v: Variant) => data.variants!.filter((c) => c.v === v).length;
+      summary.push(
+        `${code} variants: ${data.variants.length} (showcase=${by('s')} borderless=${by('b')} extended=${by('e')} etched/neon=${by('x')});` +
+          ` edhplay exact=${variantStats.exact} any-print=${variantStats.any} unresolved=${variantStats.none}`,
+      );
+    }
   }
 
   const canonical = JSON.stringify(sets);

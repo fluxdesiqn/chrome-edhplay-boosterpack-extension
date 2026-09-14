@@ -12,6 +12,8 @@ import { applyMainMessage, bridgeReady, config as configSig, readOnly } from '@u
 import { loadConfig, loadRoomState, saveConfig, saveRoomState } from './storage';
 import { RoomLock, rpc } from './lock';
 import cssText from '@ui/styles.css?inline';
+import revealCss from '@ui/reveal.css?inline';
+import { RevealHost } from '@ui/RevealHost';
 
 const GAME_PATH = /^\/games\/([^/]+)\/(play|spectate)\/?$/;
 
@@ -86,7 +88,7 @@ function mountPanel(): void {
   host.id = 'hok-host';
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
-  style.textContent = cssText;
+  style.textContent = cssText + '\n' + revealCss;
   shadow.appendChild(style);
   const mount = document.createElement('div');
   shadow.appendChild(mount);
@@ -114,6 +116,9 @@ function mountPanel(): void {
     }, 300);
   };
   render(h(Panel, { send: (m) => bridge.send(m), onConfig, onExportRecord }), mount);
+  const revealMount = document.createElement('div');
+  shadow.appendChild(revealMount);
+  render(h(RevealHost, { send: (m) => bridge.send(m) }), revealMount);
 }
 
 // Keyboard commands relayed from the background worker.

@@ -9,7 +9,7 @@ import { resetIds, WASTES_PRINT_ID } from '../fixtures/game-state';
 import { buildDeck } from '../harness/deck';
 import { FakeServer } from '../harness/fake-server';
 import { FakeWs } from '../harness/fake-ws';
-import { P1, P2, sweepAndActivate } from '../harness/flows';
+import { P1, P2, sweep, sweepAndActivate } from '../harness/flows';
 import { createWorld, findCard, flush, until, type World } from '../harness/world';
 
 const worlds: World[] = [];
@@ -106,6 +106,41 @@ describe('peers', () => {
     expect(seen!.zone).toBe('battlefield');
     // The other hand blank is still private.
     expect(w2.iso.peer(P1)!.mappings[handIds[1]!]).toBeUndefined();
+  });
+
+  it('C5: opening a collector booster shows the reveal to the peer with all 15 cards, then ends on shuffle-in', async () => {
+    const { server, w1, w2 } = await setupRoom();
+    const swept = await sweep(w1);
+    expect(swept.sweep.phase).toBe('done');
+
+    w1.send({ type: 'cmd', cmd: 'activate', set: 'neo', kind: 'collector' });
+    await until(() => w2.iso.of('reveal').length > 0, 'peer reveal');
+    const ownerReveal = w1.iso.of('reveal').at(-1)!;
+    const peerReveal = w2.iso.of('reveal').at(-1)!;
+    expect(ownerReveal.isOwner).toBe(true);
+    expect(peerReveal.isOwner).toBe(false);
+    expect(peerReveal.ownerId).toBe(P1);
+    expect(peerReveal.pack.kind).toBe('collector');
+    expect(peerReveal.cards).toHaveLength(15);
+    expect(peerReveal.cards.map((c) => c.ref)).toEqual(ownerReveal.cards.map((c) => c.ref));
+    expect(peerReveal.cards.every((c) => c.identity.name && c.identity.name !== 'Wastes')).toBe(true);
+    expect(peerReveal.pack.foil.length).toBeGreaterThan(0);
+    // The pack line on the wire carried kind, refs and foil indices in one chat message.
+    const packLine = server.log.find(syncLine('pack'));
+    expect(packLine).toBeDefined();
+    const decoded = decodeSync(String(packLine!.msg['message']));
+    expect(decoded && decoded.t === 'pack' ? decoded.c?.length : 0).toBe(15);
+    expect(String(packLine!.msg['message']).length).toBeLessThanOrEqual(500);
+    // Nothing is in the pile yet; the owner is at the reveal.
+    expect(w1.iso.state()!.pile).toHaveLength(0);
+    expect(w1.iso.state()!.activation?.phase).toBe('rolled');
+
+    w1.send({ type: 'cmd', cmd: 'shuffle-in' });
+    await until(() => w2.iso.of('reveal-end').length > 0, 'peer reveal-end');
+    expect(w2.iso.of('reveal-end').at(-1)!.n).toBe(1);
+    await until(() => w1.iso.of('offer').length > 0, 'owner offer');
+    expect(w1.iso.state()!.pile).toHaveLength(11);
+    expect(server.log.some(syncLine('shuf'))).toBe(true);
   });
 
   it('C3: the map line for an app-path move is written BEFORE the move_card', async () => {

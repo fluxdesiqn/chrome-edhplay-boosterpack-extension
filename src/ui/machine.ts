@@ -1,6 +1,7 @@
 /** UI-side state, fed by bridge messages from the MAIN-world engine. */
 import { signal, computed } from '@preact/signals';
 import type { Diag, MainToIso, OfferCard, SocketCtx } from '@shared/bridge-contract';
+import type { RolledPackRecord } from '@shared/state';
 import type { Activation, Config, GamePhase, HokGameState, LedgerEntry, PeerView } from '@shared/state';
 import { defaultConfig, emptyPhase } from '@shared/state';
 import type { ZoneSnapshot } from '@shared/bridge-contract';
@@ -18,6 +19,35 @@ export const needsReload = signal(false);
 export const config = signal<Config>(defaultConfig);
 export const readOnly = signal(false);
 export const bridgeReady = signal(false);
+
+export type RevealPhase = 'opening' | 'revealed' | 'shuffling' | 'closed';
+export interface RevealState {
+  ownerId: string;
+  ownerName: string;
+  isOwner: boolean;
+  pack: RolledPackRecord;
+  cards: OfferCard[];
+  phase: RevealPhase;
+}
+export const reveal = signal<RevealState | null>(null);
+const OPENING_MS = 900;
+const SHUFFLE_MS = 1200;
+let revealTimer: ReturnType<typeof setTimeout> | null = null;
+
+function setRevealPhase(phase: RevealPhase, after?: () => void) {
+  const r = reveal.value;
+  if (!r) return;
+  reveal.value = { ...r, phase };
+  if (revealTimer) clearTimeout(revealTimer);
+  revealTimer = null;
+  if (after) revealTimer = setTimeout(after, phase === 'opening' ? OPENING_MS : SHUFFLE_MS);
+}
+
+export function closeReveal(): void {
+  if (revealTimer) clearTimeout(revealTimer);
+  revealTimer = null;
+  reveal.value = null;
+}
 
 export type Screen = 'disabled' | 'waiting' | 'deck-check' | 'sweep' | 'ready' | 'activate';
 
@@ -59,6 +89,20 @@ export function applyMainMessage(msg: MainToIso): void {
     case 'offer':
       offer.value = { activation: msg.activation, offer: msg.offer, pileSize: msg.pileSize, blanksLeft: msg.blanksLeft };
       break;
+    case 'reveal': {
+      const same = reveal.value && reveal.value.ownerId === msg.ownerId && reveal.value.pack.n === msg.pack.n;
+      if (same) break;
+      reveal.value = { ownerId: msg.ownerId, ownerName: msg.ownerName, isOwner: msg.isOwner, pack: msg.pack, cards: msg.cards, phase: 'opening' };
+      setRevealPhase('opening', () => setRevealPhase('revealed'));
+      break;
+    }
+    case 'reveal-end': {
+      const r = reveal.value;
+      if (!r || r.ownerId !== msg.ownerId || r.pack.n !== msg.n) break;
+      if (msg.cancelled) closeReveal();
+      else setRevealPhase('shuffling', () => closeReveal());
+      break;
+    }
     case 'ledger':
       ledger.value = msg.entries;
       break;

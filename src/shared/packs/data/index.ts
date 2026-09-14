@@ -15,4 +15,4 @@ export const SET_DATA: Record<SetCode, SetData> = {
 };
 
 /** First 8 hex of sha256 over the canonical JSON of the four sets, in code order. */
-export const DATA_VERSION: string = '470ff5f2';
+export const DATA_VERSION: string = '0b83d3fa';

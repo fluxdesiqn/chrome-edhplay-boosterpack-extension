@@ -58,3 +58,8 @@
 label.hok-check { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
 input.hok-input, select.hok-select { background: #120d1c; color: #fff; border: 1px solid #4a3a66; border-radius: 5px; padding: 4px 6px; font-size: 12px; }
 .hok-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; }
+.hok-btn.selected { outline: 2px solid #b79cff; outline-offset: -2px; background: #4d3a75; }
+.hok-kinds { display: flex; gap: 6px; }
+.hok-pillbtn { flex: 1; background: #24193a; border: 1px solid #4a3a66; color: #cfc6e0; padding: 5px 6px; border-radius: 999px; cursor: pointer; font-size: 11px; }
+.hok-pillbtn.selected { background: #6b4bd1; border-color: #6b4bd1; color: #fff; }
+.hok-pillbtn:disabled { opacity: .4; cursor: not-allowed; }

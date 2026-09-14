@@ -82,11 +82,14 @@ export function applySync(
     }
     case 'pack': {
       if (!peer.packs.some((p) => p.n === msg.n)) {
-        const packs = [...peer.packs, { n: msg.n, set: msg.set, seed: msg.seed, dataVersion: msg.dv, cards: [] }];
+        const packs = [...peer.packs, { n: msg.n, set: msg.set, kind: msg.k ?? 'draft', seed: msg.seed, dataVersion: msg.dv, cards: msg.c ?? [], foil: msg.f ?? [] }];
         packs.sort((a, b) => a.n - b.n);
         peer = { ...peer, packs };
         changed = true;
       }
+      break;
+    }
+    case 'shuf': {
       break;
     }
     case 'map': {

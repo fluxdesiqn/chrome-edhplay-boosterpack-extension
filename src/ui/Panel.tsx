@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { IsoToMain } from '@shared/bridge-contract';
-import { SET_CODES, SET_NAMES, type SetCode } from '@shared/packs/types';
+import { AVAILABLE_PACKS, PACK_KIND_NAMES, SET_CODES, SET_NAMES, packLabel, type PackKind, type SetCode } from '@shared/packs/types';
 import { config, diags, ledger, needsReload, offer, peers, phase, readOnly, screen, seq, socket, state, zones } from './machine';
 
 export interface PanelProps {
@@ -195,8 +195,8 @@ function Ready({ send, st }: { send: (m: IsoToMain) => void; st: NonNullable<typ
       </div>
       <div class="hok-section">
         {!p.isMyTurn && !p.mulliganActive && <div class="hok-note warn">Not your turn. Planeswalker abilities are sorcery speed; activate during your main phase.</div>}
-        <button class="hok-btn block" disabled={st.reservoir.length === 0 && st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'activate', set: config.value.defaultSet })}>
-          +2: Open a pack and look at four
+        <button class="hok-btn block" disabled={st.reservoir.length === 0 && st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'begin' })}>
+          +2: Choose a pack to open
         </button>
         <div style={{ height: 6 }} />
         <button class="hok-btn secondary block sm" disabled={st.pile.length === 0} onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>
@@ -232,18 +232,17 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
   useEffect(() => setPicked([]), [a.phase, a.look.join(',')]);
 
   if (a.phase === 'choose-pack') {
+    return <ChoosePack send={send} />;
+  }
+
+  if (a.phase === 'rolled' && a.pack) {
     return (
       <div class="hok-section">
-        <p class="hok-h">Open up to one sealed Kamigawa booster</p>
-        <div class="hok-sets">
-          {SET_CODES.map((code: SetCode) => (
-            <button class="hok-btn secondary" onClick={() => send({ type: 'cmd', cmd: 'activate', set: code })}>{SET_NAMES[code]}</button>
-          ))}
-        </div>
+        <p class="hok-h">Pack {a.pack.n} opened: {packLabel(a.pack.set, a.pack.kind)}</p>
+        <div class="hok-note">Everyone with the extension is looking at the {a.pack.cards.length} cards. When you are ready, shuffle them into your booster pile.</div>
+        <button class="hok-btn block" onClick={() => send({ type: 'cmd', cmd: 'shuffle-in' })}>Shuffle into booster pile</button>
         <div style={{ height: 6 }} />
-        <button class="hok-btn secondary block sm" onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>No pack, just look at the pile</button>
-        <div style={{ height: 6 }} />
-        <button class="hok-btn danger block sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel</button>
+        <button class="hok-btn danger block sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel (put the pack back)</button>
       </div>
     );
   }
@@ -285,7 +284,7 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
     );
   }
 
-  if (a.phase === 'resolving' || a.phase === 'rolled') {
+  if (a.phase === 'resolving') {
     const done = a.moves.filter((m) => m.done).length;
     return (
       <div class="hok-section">
@@ -310,6 +309,39 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
     );
   }
   return null;
+}
+
+function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
+  const [set, setSet] = useState<SetCode>(config.value.defaultSet);
+  const [kind, setKind] = useState<PackKind>('draft');
+  const kinds = AVAILABLE_PACKS[set];
+  const effectiveKind: PackKind = kinds.includes(kind) ? kind : 'draft';
+  return (
+    <div class="hok-section">
+      <p class="hok-h">Open up to one sealed Kamigawa booster</p>
+      <div class="hok-sets">
+        {SET_CODES.map((code: SetCode) => (
+          <button class={`hok-btn secondary ${set === code ? 'selected' : ''}`} onClick={() => setSet(code)}>{SET_NAMES[code]}</button>
+        ))}
+      </div>
+      <div style={{ height: 8 }} />
+      <div class="hok-kinds">
+        {(['draft', 'set', 'collector'] as PackKind[]).map((k) => (
+          <button class={`hok-pillbtn ${effectiveKind === k ? 'selected' : ''}`} disabled={!kinds.includes(k)} title={kinds.includes(k) ? '' : `${SET_NAMES[set]} was not sold as ${PACK_KIND_NAMES[k]}s`} onClick={() => setKind(k)}>
+            {PACK_KIND_NAMES[k]}
+          </button>
+        ))}
+      </div>
+      <div style={{ height: 8 }} />
+      <button class="hok-btn block" onClick={() => send({ type: 'cmd', cmd: 'activate', set, kind: effectiveKind })}>
+        Open {packLabel(set, effectiveKind)}
+      </button>
+      <div style={{ height: 6 }} />
+      <button class="hok-btn secondary block sm" onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>No pack, just look at the pile</button>
+      <div style={{ height: 6 }} />
+      <button class="hok-btn danger block sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel</button>
+    </div>
+  );
 }
 
 function PeersTab({ send }: { send: (m: IsoToMain) => void }) {

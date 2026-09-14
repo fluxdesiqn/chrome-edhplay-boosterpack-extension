@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SET_DATA } from '@shared/packs/data';
-import { _resetIdentityCaches, cardsInSet, findCard, identityFor, isKamigawaName } from '@shared/packs/identity';
+import { _resetIdentityCaches, cardsInSet, findCard, identityFor, isKamigawaName, variantLabel } from '@shared/packs/identity';
 import { makeRef, parseRef, SET_CODES, type PackCard } from '@shared/packs/types';
 
 describe('identity', () => {
@@ -65,6 +65,42 @@ describe('identity', () => {
     expect(findCard('neo:nope')).toBeNull();
     expect(findCard('xyz:1')).toBeNull();
     expect(identityFor('chk:')).toBeNull();
+  });
+
+  it('findCard covers neo collector variants and identityFor images them by their own Scryfall id', () => {
+    const variants = SET_DATA.neo.variants!;
+    expect(variants.length).toBeGreaterThan(0);
+    for (const v of variants) {
+      expect(findCard(makeRef('neo', v.cn))).toBe(v);
+      expect(v.co).toBe(true);
+      expect(['s', 'b', 'e', 'x']).toContain(v.v);
+      // variant collector numbers never collide with the regular printings or basics
+      expect(SET_DATA.neo.cards.some((c) => c.cn === v.cn)).toBe(false);
+      expect(SET_DATA.neo.basics!.some((c) => c.cn === v.cn)).toBe(false);
+    }
+    const showcase = variants.find((c) => c.v === 's') as PackCard;
+    const regular = SET_DATA.neo.cards.find((c) => c.name === showcase.name) as PackCard;
+    expect(regular).toBeDefined();
+    const id = identityFor(makeRef('neo', showcase.cn))!;
+    expect(id.name).toBe(regular.name);
+    expect(id.front_image_uri).toContain(showcase.id);
+    expect(id.front_image_uri).not.toContain(regular.id);
+    expect(id.card_print_id).toBe(showcase.ep);
+    expect(id.card_print_id).not.toBe(regular.ep);
+  });
+
+  it('variantLabel names every variant kind and is null for regular printings', () => {
+    expect(variantLabel(SET_DATA.neo.cards[0] as PackCard)).toBeNull();
+    expect(variantLabel(SET_DATA.chk.cards[0] as PackCard)).toBeNull();
+    const variants = SET_DATA.neo.variants!;
+    expect(variantLabel(variants.find((c) => c.v === 's') as PackCard)).toBe('Showcase');
+    expect(variantLabel(variants.find((c) => c.v === 'b') as PackCard)).toBe('Borderless');
+    expect(variantLabel(variants.find((c) => c.v === 'e') as PackCard)).toBe('Extended art');
+    const etched = variants.find((c) => c.v === 'x' && c.name !== 'Hidetsugu, Devouring Chaos') as PackCard;
+    expect(variantLabel(etched)).toBe('Foil etched');
+    const neon = variants.find((c) => c.v === 'x' && c.name === 'Hidetsugu, Devouring Chaos');
+    if (neon) expect(variantLabel(neon)).toBe('Neon ink');
+    for (const v of variants) expect(variantLabel(v)).not.toBeNull();
   });
 
   it('isKamigawaName recognises full and front-face names only', () => {

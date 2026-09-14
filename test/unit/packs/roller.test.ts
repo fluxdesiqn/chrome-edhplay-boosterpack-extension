@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DATA_VERSION, SET_DATA } from '@shared/packs/data';
-import { poolsFor, rollPack, shuffleIntoPile, TEMPLATES, verifyPack } from '@shared/packs/roller';
+import { PACK_SIZE, poolsFor, rollPack, rollPackOfKind, shuffleIntoPile, TEMPLATES, verifyPack } from '@shared/packs/roller';
 import { makeRef, parseRef, SET_CODES, type CardRef, type PackCard, type SetCode } from '@shared/packs/types';
 
 const seedOf = (i: number): string => i.toString(16).padStart(16, '0');
@@ -20,8 +20,16 @@ describe('roller', () => {
       expect(a.set).toBe(set);
       expect(a.seed).toBe('0123456789abcdef');
       expect(a.dataVersion).toBe(DATA_VERSION);
+      expect(a.kind).toBe('draft');
+      expect(a.foil).toEqual([]);
       expect(a.cards).toHaveLength(TEMPLATES[set].slots.length);
+      expect(a.cards).toHaveLength(PACK_SIZE.draft);
+      expect(rollPackOfKind(set, 'draft', '0123456789abcdef')).toEqual(a);
     }
+  });
+
+  it('DATA_VERSION is pinned (bump the goldens knowingly when data changes)', () => {
+    expect(DATA_VERSION).toBe('0b83d3fa');
   });
 
   it('different seeds → different packs', () => {
@@ -125,10 +133,13 @@ describe('roller', () => {
     tampered.cards[0] = makeRef('sok', '999');
     expect(verifyPack(tampered)).toBe(false);
     expect(verifyPack({ ...tampered, dataVersion: 'ffffffff' })).toBe(true);
+    expect(verifyPack({ ...pack, foil: [3] })).toBe(false);
+    expect(verifyPack({ ...pack, kind: 'set' })).toBe(false);
   });
 
   // Golden snapshots generated once from the pinned RNG + data. If these change,
   // packs rolled by older clients will no longer verify: bump DATA_VERSION knowingly.
+  // These predate the Set/Collector rollers and must never move: the draft draw stream is frozen.
   it('golden snapshots', () => {
     const GOLDEN: Record<SetCode, Record<string, string[]>> = {
       chk: {

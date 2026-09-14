@@ -15,16 +15,17 @@ import {
   openPack,
   pendingMoves,
   pickCards,
+  shufflePackIn,
   type ActivationEffect,
 } from '@shared/game/activation';
 import { reducePhase } from '@shared/game/phase';
 import { DATA_VERSION } from '@shared/packs/data';
 import { identityFor } from '@shared/packs/identity';
 import { newSeed } from '@shared/packs/rng';
-import { rollPack, shuffleIntoPile } from '@shared/packs/roller';
-import type { CardRef, SetCode } from '@shared/packs/types';
+import { rollPackOfKind, shuffleIntoPile } from '@shared/packs/roller';
+import type { CardRef, PackKind, SetCode } from '@shared/packs/types';
 import { PROTOCOL_VERSION, stockNonBattlefieldUpdates, type CardIdentity, type Zone } from '@shared/protocol';
-import { defaultConfig, emptyGameState, emptyPhase, type Config, type GamePhase, type HokGameState, type PeerView } from '@shared/state';
+import { defaultConfig, emptyGameState, emptyPhase, type Config, type GamePhase, type HokGameState, type PeerView, type RolledPackRecord } from '@shared/state';
 import { chunkMapPairs, decodeSync, encodeSync, HELLO_TRAILER, isSyncLine } from '@shared/sync/codec';
 import { applySync, mappingIndex } from '@shared/sync/peers';
 import { SyncQueue } from '@shared/sync/queue';
@@ -303,6 +304,12 @@ export class Engine {
     this.peers = res.peers;
     if (res.rejected) this.diag('warn', `sync rejected: ${res.rejected}`);
     if (msg.t === 'hello' || msg.t === 'need') this.replyWithState(senderId, msg.t);
+    if (msg.t === 'pack' && msg.c && msg.c.length && res.changed) {
+      // Only live packs get a reveal; re-broadcasts of old packs arrive with `state` and are not "new".
+      const pack: RolledPackRecord = { n: msg.n, set: msg.set, kind: msg.k ?? 'draft', seed: msg.seed, dataVersion: msg.dv, cards: msg.c, foil: msg.f ?? [] };
+      this.sendReveal(senderId, pack, false);
+    }
+    if (msg.t === 'shuf') this.bridge.send({ type: 'reveal-end', ownerId: senderId, n: msg.n });
     if (res.changed) {
       const before = this.rewrite;
       void before;
@@ -319,7 +326,7 @@ export class Engine {
     if (typeof last === 'number' && Date.now() - last < 5000) return;
     this.lastReplyAt.set(requester, Date.now());
     this.sync.enqueueState(this.stateMessage());
-    for (const p of s.packs) this.sync.enqueue({ t: 'pack', n: p.n, set: p.set, seed: p.seed, dv: p.dataVersion });
+    for (const p of s.packs) this.sync.enqueue({ t: 'pack', n: p.n, set: p.set, k: p.kind, seed: p.seed, dv: p.dataVersion, c: p.cards, f: p.foil });
     const pairs = publicPairs(s);
     if (pairs.length) this.sync.enqueueMap(pairs);
     this.diag('info', `replied to ${why} from ${requester.slice(0, 8)} with ${pairs.length} mapping(s)`);
@@ -403,10 +410,23 @@ export class Engine {
         break;
       case 'cancel':
         if (this.sweepAbort) this.sweepAbort.abort();
-        else if (this.state?.activation) this.applyStep(cancelActivation(this.state));
+        else if (this.state?.activation) {
+          const a = this.state.activation;
+          if (a.phase === 'rolled' && a.pack) {
+            this.sync.enqueue({ t: 'shuf', n: a.pack.n }, { priority: true });
+            this.bridge.send({ type: 'reveal-end', ownerId: this.state.playerId, n: a.pack.n, cancelled: true });
+          }
+          this.applyStep(cancelActivation(this.state));
+        }
+        break;
+      case 'begin':
+        this.beginOnly();
         break;
       case 'activate':
-        this.activate(m.set);
+        this.activate(m.set, m.kind ?? 'draft');
+        break;
+      case 'shuffle-in':
+        if (this.state) this.applyStep(shufflePackIn(this.state, shuffleIntoPile));
         break;
       case 'look-fewer':
         if (this.state) this.applyStep(lookFewer(this.state));
@@ -519,7 +539,20 @@ export class Engine {
 
   // ------------------------------------------------------------------ activation
 
-  private activate(set: SetCode | null): void {
+  private beginOnly(): void {
+    const s = this.state;
+    if (!s) return;
+    if (s.activation && s.activation.phase !== 'done') return;
+    const r = beginActivation(clearDoneActivation(s), this.phase.turnSeq);
+    if (r.error) {
+      this.diag('warn', r.error);
+      return;
+    }
+    this.state = r.state;
+    this.pushState();
+  }
+
+  private activate(set: SetCode | null, kind: PackKind = 'draft'): void {
     let s = this.state;
     if (!s) return;
     if (!s.activation || s.activation.phase === 'done') {
@@ -535,7 +568,7 @@ export class Engine {
       this.pushState();
       return;
     }
-    const r = openPack(s, set, (code) => rollPack(code, newSeed()), shuffleIntoPile);
+    const r = openPack(s, set, (code, k) => rollPackOfKind(code, k, newSeed()), shuffleIntoPile, kind);
     this.applyStep(r);
   }
 
@@ -559,7 +592,16 @@ export class Engine {
     this.state = r.state;
     this.rebuildIndex();
     const chatPack = r.effects.find((e): e is Extract<ActivationEffect, { kind: 'chat-pack' }> => e.kind === 'chat-pack');
-    if (chatPack) this.sync.enqueue({ t: 'pack', n: chatPack.pack.n, set: chatPack.pack.set, seed: chatPack.pack.seed, dv: chatPack.pack.dataVersion }, { priority: true });
+    if (chatPack) {
+      const p = chatPack.pack;
+      this.sync.enqueue({ t: 'pack', n: p.n, set: p.set, k: p.kind, seed: p.seed, dv: p.dataVersion, c: p.cards, f: p.foil }, { priority: true });
+      this.sendReveal(r.state.playerId, p, true);
+    }
+    const shuffled = r.effects.find((e): e is Extract<ActivationEffect, { kind: 'chat-shuffled' }> => e.kind === 'chat-shuffled');
+    if (shuffled) {
+      this.sync.enqueue({ t: 'shuf', n: shuffled.n }, { priority: true });
+      this.bridge.send({ type: 'reveal-end', ownerId: r.state.playerId, n: shuffled.n });
+    }
     const chatMap = r.effects.find((e): e is Extract<ActivationEffect, { kind: 'chat-map' }> => e.kind === 'chat-map');
     if (chatMap) this.sync.flushMapNow(chatMap.pairs);
     this.pushState();
@@ -591,6 +633,13 @@ export class Engine {
       this.diag('error', msg);
       this.bridge.send({ type: 'seq', seq: 'activate', step: 'Stuck', pct: 0.5, error: msg });
     }
+  }
+
+  private sendReveal(ownerId: string, pack: RolledPackRecord, isOwner: boolean): void {
+    const cards: OfferCard[] = pack.cards.map((ref) => ({ ref, identity: identityFor(ref) ?? placeholderIdentity(ref) }));
+    for (const c of cards) prefetch(c.identity.front_image_uri);
+    const ownerName = isOwner ? 'You' : (this.zones.players.get(ownerId)?.name || ownerId.slice(0, 8));
+    this.bridge.send({ type: 'reveal', ownerId, ownerName, isOwner, pack, cards });
   }
 
   private pushOffer(): void {

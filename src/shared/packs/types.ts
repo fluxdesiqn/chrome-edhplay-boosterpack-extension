@@ -11,6 +11,23 @@ export const SET_NAMES: Record<SetCode, string> = {
 
 export type Rarity = 'c' | 'u' | 'r' | 'm';
 
+/** Booster products. Only Neon Dynasty was sold as Set and Collector boosters. */
+export type PackKind = 'draft' | 'set' | 'collector';
+export const PACK_KINDS: readonly PackKind[] = ['draft', 'set', 'collector'];
+export const PACK_KIND_NAMES: Record<PackKind, string> = { draft: 'Draft Booster', set: 'Set Booster', collector: 'Collector Booster' };
+export const AVAILABLE_PACKS: Record<SetCode, readonly PackKind[]> = {
+  chk: ['draft'],
+  bok: ['draft'],
+  sok: ['draft'],
+  neo: ['draft', 'set', 'collector'],
+};
+export function packLabel(set: SetCode, kind: PackKind): string {
+  return `${SET_NAMES[set]} ${PACK_KIND_NAMES[kind]}`;
+}
+
+/** Alternate-frame printing kinds: showcase, borderless, extended art, foil-etched / neon ink. */
+export type Variant = 's' | 'b' | 'e' | 'x';
+
 /** Card layout: normal, flip (CHK-block flip cards), transform (NEO sagas). */
 export type Layout = 'n' | 'f' | 't';
 
@@ -35,6 +52,10 @@ export interface PackCard {
   mana_cost?: string;
   cmc?: number;
   ci?: string[];
+  /** alternate-frame variant kind (absent for the regular printing) */
+  v?: Variant;
+  /** collector-booster-only printing (not found in draft/set boosters) */
+  co?: boolean;
 }
 
 export interface SetData {
@@ -45,6 +66,8 @@ export interface SetData {
   cards: PackCard[];
   /** neo only: the ukiyo-e basics */
   basics?: PackCard[];
+  /** neo only: collector-booster-only alternate printings (showcase, borderless, extended art, etched) */
+  variants?: PackCard[];
 }
 
 /** Stable, data-version-independent wire reference: "neo:77". */
@@ -66,7 +89,10 @@ export function parseRef(ref: string): { set: SetCode; cn: string } | null {
 
 export interface RolledPack {
   set: SetCode;
+  kind: PackKind;
   seed: string;
   dataVersion: string;
   cards: CardRef[];
+  /** indices into `cards` that are traditional/etched foil (cosmetic) */
+  foil: number[];
 }

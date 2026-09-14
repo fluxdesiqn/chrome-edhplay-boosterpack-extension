@@ -1,0 +1,157 @@
+/* Pack reveal overlay. Rendered inside the extension shadow root as a sibling of the panel;
+   every selector is scoped under .hok-reveal* so nothing leaks. */
+
+.hok-reveal {
+  position: fixed; inset: 0; z-index: 2147483001;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: 24px;
+  background: rgba(8,4,14,.78);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #e8e6f0;
+  --hok-c1: #ff6a3d; --hok-c2: #c2185b; --hok-edge: #4a3a66;
+}
+/* Set hues and kind borders (collector gold, set silver). */
+.hok-reveal--bok { --hok-c1: #4f6bff; --hok-c2: #7b2ff7; }
+.hok-reveal--sok { --hok-c1: #3fb950; --hok-c2: #d4a72c; }
+.hok-reveal--neo { --hok-c1: #ff2bd6; --hok-c2: #22d3ee; }
+.hok-reveal--set { --hok-edge: #cfd3dc; }
+.hok-reveal--collector { --hok-edge: #f0c24b; }
+
+/* Header */
+.hok-reveal-head { text-align: center; max-width: 900px; }
+.hok-reveal-title { display: inline; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+.hok-reveal-pill {
+  display: inline-block; vertical-align: middle; margin-left: 10px;
+  font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #3d2e57; color: #d8c8ff;
+}
+.hok-reveal-sub { margin: 6px 0 0; color: #9d93b3; font-size: 12px; }
+
+/* Booster wrapper (opening phase) */
+.hok-reveal-wrapper {
+  position: relative; width: 220px; height: 320px; border-radius: 14px; overflow: hidden;
+  border: 3px solid var(--hok-edge);
+  background: linear-gradient(160deg, var(--hok-c1), var(--hok-c2) 60%, #1b1526);
+  box-shadow: 0 20px 50px rgba(0,0,0,.6), inset 0 0 40px rgba(255,255,255,.12);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  animation: hok-reveal-pop .45s cubic-bezier(.2,.9,.3,1.2) both;
+}
+.hok-reveal-wrapper-body {
+  display: flex; flex-direction: column; gap: 6px; padding: 20px;
+  font-weight: 800; font-size: 20px; text-shadow: 0 2px 8px rgba(0,0,0,.6);
+}
+.hok-reveal-kind { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: .85; }
+.hok-reveal-tear {
+  position: absolute; left: -3px; right: -3px; top: -3px; height: 46px;
+  background: linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,.08));
+  border-bottom: 2px dashed rgba(255,255,255,.55);
+  animation: hok-reveal-tear .4s ease-in .5s both;
+}
+@keyframes hok-reveal-pop { from { transform: scale(.6) rotate(-6deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes hok-reveal-tear { to { transform: translateY(-70px) rotate(-4deg); opacity: 0; } }
+
+/* Card grid: 5 columns wide, 3 narrow; card width bounded so 3 rows fit the viewport. */
+.hok-reveal-grid {
+  --hok-cw: min(150px, 17vw, calc((100vh - 240px) / 3 * .7176));
+  position: relative; display: grid; grid-template-columns: repeat(5, var(--hok-cw)); gap: 12px;
+  justify-content: center; align-content: start;
+  max-height: calc(100vh - 200px); overflow: auto; padding: 8px;
+}
+@media (max-width: 720px) {
+  .hok-reveal-grid { --hok-cw: min(150px, 28vw); grid-template-columns: repeat(3, var(--hok-cw)); }
+}
+.hok-reveal-empty { grid-column: 1 / -1; color: #9d93b3; padding: 30px; text-align: center; }
+
+/* Card */
+.hok-reveal-card { position: relative; perspective: 800px; transition: transform .15s ease-out; }
+.hok-reveal--revealed .hok-reveal-card:hover { transform: scale(1.06); z-index: 5; }
+.hok-reveal-flip {
+  position: relative; aspect-ratio: 488 / 680; border-radius: 4.5% / 3.5%;
+  transform-style: preserve-3d; box-shadow: 0 6px 18px rgba(0,0,0,.5);
+}
+.hok-reveal-face, .hok-reveal-back {
+  position: absolute; inset: 0; border-radius: inherit; overflow: hidden;
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
+}
+.hok-reveal-face img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* CSS-drawn card back: dark with a subtle ringed circle. */
+.hok-reveal-back {
+  transform: rotateY(180deg);
+  background:
+    radial-gradient(circle at 50% 50%, #3d2e57 0, #3d2e57 22%, transparent 23%),
+    radial-gradient(circle at 50% 50%, transparent 30%, #24193a 31%, #24193a 33%, transparent 34%),
+    #120d1c;
+  border: 3px solid #2b1f3d; box-shadow: inset 0 0 20px rgba(0,0,0,.6);
+}
+/* Staggered flip-in (60 ms per card) when opening -> revealed. */
+.hok-reveal-card--flip .hok-reveal-flip {
+  animation: hok-reveal-flip .55s cubic-bezier(.3,.7,.3,1) both;
+  animation-delay: calc(var(--hok-i, 0) * 60ms);
+}
+@keyframes hok-reveal-flip { from { transform: rotateY(180deg) translateY(12px); } to { transform: rotateY(0) translateY(0); } }
+
+/* Caption + rarity dot */
+.hok-reveal-cap {
+  display: flex; align-items: center; gap: 5px; margin-top: 5px;
+  font-size: 11px; color: #cfc6e0; white-space: nowrap; transition: opacity .3s;
+}
+.hok-reveal-cap span { overflow: hidden; text-overflow: ellipsis; }
+.hok-reveal-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #8f86a4; }
+.hok-reveal-dot--u { background: #c9d1e0; }
+.hok-reveal-dot--r { background: #e6b422; }
+.hok-reveal-dot--m { background: #ff7a1a; }
+
+/* Foil: translated holographic sheen (transform-only, compositor friendly) + tag. */
+.hok-reveal-sheen { position: absolute; inset: 0; overflow: hidden; pointer-events: none; mix-blend-mode: screen; }
+.hok-reveal-sheen::after {
+  content: ''; position: absolute; inset: -60%;
+  background: linear-gradient(115deg, transparent 35%, rgba(255,120,220,.5) 45%, rgba(120,255,240,.5) 50%, rgba(255,240,120,.5) 55%, transparent 65%);
+  animation: hok-reveal-sheen 3s linear infinite; will-change: transform;
+}
+@keyframes hok-reveal-sheen { from { transform: translate(-40%, -40%); } to { transform: translate(40%, 40%); } }
+.hok-reveal-tag {
+  position: absolute; top: 5%; left: 6%;
+  font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(0,0,0,.7); color: #fff2b0; border: 1px solid rgba(255,220,120,.6);
+}
+
+/* Shuffling: gather to the grid centre (offsets measured in JS), then three alternating cuts. */
+.hok-reveal--shuffling .hok-reveal-card {
+  --hok-cut: 1; pointer-events: none;
+  animation: hok-reveal-gather .5s ease-in both, hok-reveal-cut .66s .55s ease-in-out both;
+}
+.hok-reveal--shuffling .hok-reveal-card:nth-child(even) { --hok-cut: -1; }
+.hok-reveal--shuffling .hok-reveal-cap { opacity: 0; }
+@keyframes hok-reveal-gather {
+  to { transform: translate(var(--hok-dx, 0px), var(--hok-dy, 0px)) rotate(var(--hok-rot, 0deg)); }
+}
+@keyframes hok-reveal-cut {
+  0%, 33%, 66%, 100% { transform: translate(var(--hok-dx, 0px), var(--hok-dy, 0px)) rotate(var(--hok-rot, 0deg)); }
+  17% { transform: translate(calc(var(--hok-dx, 0px) + 22px * var(--hok-cut)), var(--hok-dy, 0px)) rotate(var(--hok-rot, 0deg)); }
+  50% { transform: translate(calc(var(--hok-dx, 0px) - 22px * var(--hok-cut)), var(--hok-dy, 0px)) rotate(var(--hok-rot, 0deg)); }
+  83% { transform: translate(calc(var(--hok-dx, 0px) + 22px * var(--hok-cut)), var(--hok-dy, 0px)) rotate(var(--hok-rot, 0deg)); }
+}
+
+/* Footer */
+.hok-reveal-foot { display: flex; flex-direction: column; align-items: center; gap: 8px; min-height: 64px; }
+.hok-reveal-btn {
+  background: #6b4bd1; border: 0; color: #fff; padding: 10px 18px; border-radius: 8px; cursor: pointer;
+  font: inherit; font-weight: 600; font-size: 14px; box-shadow: 0 6px 18px rgba(107,75,209,.4);
+}
+.hok-reveal-btn:hover { background: #7d5fe0; }
+.hok-reveal-btn:focus-visible { outline: 2px solid #d8c8ff; outline-offset: 2px; }
+.hok-reveal-btn--secondary { background: #3d2e57; box-shadow: none; }
+.hok-reveal-btn--secondary:hover { background: #4a3a66; }
+.hok-reveal-muted { color: #9d93b3; font-size: 12px; }
+.hok-reveal-status { font-size: 15px; font-weight: 600; color: #d8c8ff; animation: hok-reveal-pulse 1.2s ease-in-out infinite; }
+@keyframes hok-reveal-pulse { 50% { opacity: .55; } }
+
+/* Reduced motion (prop or OS preference): no animations or transforms, just show/hide. */
+.hok-reveal--static *, .hok-reveal--static *::after { animation: none !important; transition: none !important; }
+.hok-reveal--static .hok-reveal-card, .hok-reveal--static .hok-reveal-flip, .hok-reveal--static .hok-reveal-tear { transform: none !important; }
+.hok-reveal--static .hok-reveal-back { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .hok-reveal *, .hok-reveal *::after { animation: none !important; transition: none !important; }
+  .hok-reveal .hok-reveal-card, .hok-reveal .hok-reveal-flip, .hok-reveal .hok-reveal-tear { transform: none !important; }
+  .hok-reveal .hok-reveal-back { display: none; }
+}

@@ -1,6 +1,7 @@
 import type { Activation, CardSummary, Config, GamePhase, HokGameState, LedgerEntry, PeerView } from './state';
 import type { CardIdentity } from './protocol';
-import type { CardRef, SetCode } from './packs/types';
+import type { CardRef, PackKind, SetCode } from './packs/types';
+import type { RolledPackRecord } from './state';
 
 export const BRIDGE_TAG = '__hok';
 export const BRIDGE_VERSION = 1;
@@ -41,6 +42,10 @@ export type MainToIso =
   | { type: 'peers'; peers: PeerView[] }
   | { type: 'seq'; seq: 'sweep' | 'activate'; step: string; pct: number; error?: string; done?: boolean }
   | { type: 'offer'; activation: Activation; offer: OfferCard[]; pileSize: number; blanksLeft: number }
+  /** A pack was opened by `ownerId` (possibly us): show the reveal overlay. */
+  | { type: 'reveal'; ownerId: string; ownerName: string; isOwner: boolean; pack: RolledPackRecord; cards: OfferCard[] }
+  /** The pack was shuffled into the pile (or the activation was cancelled): dismiss the reveal. */
+  | { type: 'reveal-end'; ownerId: string; n: number; cancelled?: boolean }
   | { type: 'ledger'; entries: LedgerEntry[] }
   | { type: 'diag'; diag: Diag }
   | { type: 'record'; frames: unknown[] }
@@ -49,8 +54,10 @@ export type MainToIso =
 export type IsoToMain =
   | { type: 'hello_ack'; nonce: string }
   | { type: 'hydrate'; roomId: string; state: HokGameState | null; config: Config; readOnly: boolean }
-  | { type: 'cmd'; cmd: 'sweep' | 'rebroadcast' | 'resync' | 'cancel' | 'reset' | 'export-record' }
-  | { type: 'cmd'; cmd: 'activate'; set: SetCode | null }
+  | { type: 'cmd'; cmd: 'sweep' | 'rebroadcast' | 'resync' | 'cancel' | 'reset' | 'export-record' | 'begin' }
+  | { type: 'cmd'; cmd: 'activate'; set: SetCode | null; kind?: PackKind }
+  /** Owner clicked "shuffle into booster pile" after the reveal. */
+  | { type: 'cmd'; cmd: 'shuffle-in' }
   | { type: 'cmd'; cmd: 'look-fewer' }
   | { type: 'cmd'; cmd: 'pick'; toHand: number[] }
   | { type: 'cmd'; cmd: 'set-placeholder'; printId: string; name: string }

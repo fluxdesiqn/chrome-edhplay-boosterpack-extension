@@ -3,12 +3,13 @@
  * HokGameState; side effects (sending moves, chat) are described as "effects"
  * for the engine to perform.
  */
-import type { CardRef, RolledPack, SetCode } from '../packs/types';
+import type { CardRef, PackKind, RolledPack, SetCode } from '../packs/types';
 import type { Activation, HokGameState, PlannedMove, RolledPackRecord } from '../state';
 
 export type ActivationEffect =
   | { kind: 'chat-pack'; pack: RolledPackRecord }
   | { kind: 'chat-map'; pairs: Array<[string, CardRef]> }
+  | { kind: 'chat-shuffled'; n: number }
   | { kind: 'move'; move: PlannedMove }
   | { kind: 'persist' };
 
@@ -36,41 +37,61 @@ export function beginActivation(state: HokGameState, turnSeq: number): StepResul
 }
 
 /**
- * Roll (or skip) a pack, shuffle it into the pile and take the top cards to look at.
- * `roll` is injected so this module stays free of data imports.
+ * Roll (or skip) a pack. With a pack the activation stops at `rolled` so the
+ * reveal can be shown; `shufflePackIn` then merges it into the pile. Without a
+ * pack we go straight to viewing the top of the existing pile.
  */
 export function openPack(
   state: HokGameState,
   set: SetCode | null,
-  roll: (set: SetCode) => RolledPack,
+  roll: (set: SetCode, kind: PackKind) => RolledPack,
   shuffleInto: (pile: CardRef[], pack: CardRef[], seed: string) => CardRef[],
+  kind: PackKind = 'draft',
 ): StepResult {
   const a = state.activation;
   if (!a || a.phase !== 'choose-pack') return { state, effects: [], error: 'not choosing a pack' };
-  const effects: ActivationEffect[] = [];
+  if (!set) return takeLook({ ...state, activation: { ...a, pack: null } }, [], shuffleInto);
+  const rolled = roll(set, kind);
+  const record: RolledPackRecord = { ...rolled, n: state.packs.length + 1 };
+  const activation: Activation = { ...a, phase: 'rolled', pack: record, look: [], toHand: [], moves: [] };
+  return {
+    state: touch({ ...state, packs: [...state.packs, record], activation }),
+    effects: [{ kind: 'chat-pack', pack: record }, { kind: 'persist' }],
+  };
+}
+
+/** After the reveal: shuffle the rolled pack into the pile and look at the top cards. */
+export function shufflePackIn(
+  state: HokGameState,
+  shuffleInto: (pile: CardRef[], pack: CardRef[], seed: string) => CardRef[],
+): StepResult {
+  const a = state.activation;
+  if (!a || a.phase !== 'rolled' || !a.pack) return { state, effects: [], error: 'no rolled pack to shuffle in' };
+  const r = takeLook(state, [{ kind: 'chat-shuffled', n: a.pack.n }], shuffleInto);
+  return r;
+}
+
+function takeLook(
+  state: HokGameState,
+  effects: ActivationEffect[],
+  shuffleInto: (pile: CardRef[], pack: CardRef[], seed: string) => CardRef[],
+): StepResult {
+  const a = state.activation!;
   let pile = state.pile;
-  let record: RolledPackRecord | null = null;
-  let packs = state.packs;
-  if (set) {
-    const rolled = roll(set);
-    record = { ...rolled, n: state.packs.length + 1 };
-    pile = shuffleInto(pile, rolled.cards, rolled.seed);
-    packs = [...packs, record];
-    effects.push({ kind: 'chat-pack', pack: record });
-  }
+  if (a.pack) pile = shuffleInto(pile, a.pack.cards, a.pack.seed);
   const lookCount = Math.min(LOOK_COUNT, pile.length);
   const look = pile.slice(0, lookCount);
   const rest = pile.slice(lookCount);
   if (look.length === 0) {
     // Nothing to look at: the ability resolves with no effect.
-    const done: Activation = { ...a, phase: 'done', pack: record, look: [], toHand: [], moves: [] };
+    const done: Activation = { ...a, phase: 'done', look: [], toHand: [], moves: [] };
     return {
-      state: touch({ ...state, pile: rest, packs, activation: done, activationCount: state.activationCount + 1 }),
+      state: touch({ ...state, pile: rest, activation: done, activationCount: state.activationCount + 1 }),
       effects: [...effects, { kind: 'persist' }],
     };
   }
-  const activation: Activation = { ...a, phase: 'viewing', pack: record, look, toHand: [], moves: [] };
-  return { state: touch({ ...state, pile: rest, packs, activation }), effects: [...effects, { kind: 'persist' }] };
+  const activation: Activation = { ...a, phase: 'viewing', look, toHand: [], moves: [] };
+  return { state: touch({ ...state, pile: rest, activation }), effects: [...effects, { kind: 'persist' }] };
 }
 
 /** Number of blanks needed for the current look. */
@@ -97,7 +118,9 @@ export function cancelActivation(state: HokGameState): StepResult {
   if (a.phase === 'resolving') return { state, effects: [], error: 'cannot cancel while resolving' };
   let pile = [...a.look, ...state.pile];
   let packs = state.packs;
-  if (a.pack) {
+  if (a.pack && a.phase === 'rolled') {
+    packs = packs.filter((p) => p.n !== a.pack!.n);
+  } else if (a.pack) {
     const remove = new Map<CardRef, number>();
     for (const c of a.pack.cards) remove.set(c, (remove.get(c) ?? 0) + 1);
     pile = pile.filter((c) => {
