@@ -64,6 +64,8 @@ export interface HokGameState {
   modeForced: boolean;
   /** mulligans taken through the extension after the sweep (first one is free in Commander) */
   mulligans: number;
+  /** the player declared they are happy with their hand */
+  mulliganDone: boolean;
   placeholderPrintId: string | null;
   placeholderName: string | null;
   sweep: SweepState;
@@ -91,6 +93,7 @@ export function emptyGameState(roomId: string, playerId: string): HokGameState {
     mode: 'heroes',
     modeForced: false,
     mulligans: 0,
+    mulliganDone: false,
     placeholderPrintId: null,
     placeholderName: null,
     sweep: { phase: 'disarmed', stepIndex: 0 },

@@ -477,6 +477,18 @@ export class Engine {
       case 'mulligan-bottom':
         void this.finishMulligan(m.ids);
         break;
+      case 'mulligan-keep':
+        if (this.state) {
+          this.state = { ...this.state, mulliganDone: true, updatedAt: Date.now() };
+          this.pushState();
+        }
+        break;
+      case 'mulligan-reopen':
+        if (this.state) {
+          this.state = { ...this.state, mulliganDone: false, updatedAt: Date.now() };
+          this.pushState();
+        }
+        break;
       case 'set-mode':
         if (this.state) {
           this.state = m.mode === 'auto' ? this.detectMode({ ...this.state, modeForced: false }) : { ...this.state, mode: m.mode, modeForced: true };
@@ -810,7 +822,7 @@ export class Engine {
         log: (msg, data) => this.diag('info', `mulligan: ${msg}`, data),
         signal: this.mulliganAbort.signal,
       });
-      this.state = { ...(this.state ?? s), mulligans: n, updatedAt: Date.now() };
+      this.state = { ...(this.state ?? s), mulligans: n, mulliganDone: false, updatedAt: Date.now() };
       this.pushState();
       const hand: CardSummary[] = out.hand
         .map((id) => this.zones.get(id))

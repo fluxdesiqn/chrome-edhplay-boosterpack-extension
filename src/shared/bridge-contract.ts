@@ -70,6 +70,8 @@ export type IsoToMain =
   /** Extension-driven Commander mulligan (after the sweep). */
   | { type: 'cmd'; cmd: 'mulligan' }
   | { type: 'cmd'; cmd: 'mulligan-bottom'; ids: string[] }
+  | { type: 'cmd'; cmd: 'mulligan-keep' }
+  | { type: 'cmd'; cmd: 'mulligan-reopen' }
   | { type: 'cmd'; cmd: 'set-mode'; mode: GameMode | 'auto' }
   /** Second-deck pile operations. */
   | { type: 'cmd'; cmd: 'pile-draw'; count: number }

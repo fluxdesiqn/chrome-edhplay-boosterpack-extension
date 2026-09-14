@@ -219,6 +219,24 @@ async function searchAll(q: string): Promise<ScryCard[]> {
   return out;
 }
 
+/** Keep the lowest-numbered printing of each card name (the regular frame). */
+export function firstPrintingPerName(cards: ScryCard[]): ScryCard[] {
+  const best = new Map<string, ScryCard>();
+  for (const c of cards) {
+    const key = (c.name ?? '').toLowerCase();
+    const cur = best.get(key);
+    if (!cur || cnCompareRaw(c.collector_number, cur.collector_number) < 0) best.set(key, c);
+  }
+  return [...best.values()];
+}
+
+function cnCompareRaw(a: string | undefined, b: string | undefined): number {
+  const na = parseInt(a ?? '', 10);
+  const nb = parseInt(b ?? '', 10);
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+  return String(a ?? '').localeCompare(String(b ?? ''));
+}
+
 async function setMeta(code: string): Promise<{ name: string; released: string } | null> {
   const cached = await cacheGet<SetSummary[]>(SETS_CACHE_KEY);
   const hit = cached?.find((s) => s.code === code);
@@ -240,11 +258,25 @@ export async function fetchSetCards(code: string): Promise<RuntimeSetData> {
   const meta = await setMeta(code);
   if (!meta) throw new Error(`unknown set "${code}"`);
 
-  const rawCards = await searchAll(`set:${code}+is:booster+-t:basic`);
+  let rawCards = await searchAll(`set:${code}+is:booster+-t:basic`);
+  let rawBasics: ScryCard[];
+  let boosterFlagged = true;
+  if (rawCards.length > 0) {
+    rawBasics = await searchAll(`set:${code}+is:booster+t:basic`);
+  } else {
+    // Scryfall has not marked booster contents for this set yet (true for every set released
+    // after Lorwyn Eclipsed at the time of writing). Fall back to the set's regular printings:
+    // no promos, no digital, and one printing per name (the lowest collector number), which
+    // drops showcase / extended-art / borderless variants that only appear in collector boosters.
+    boosterFlagged = false;
+    const all = await searchAll(`set:${code}+-t:basic+-is:promo+-is:digital`);
+    rawCards = firstPrintingPerName(all);
+    rawBasics = await searchAll(`set:${code}+t:basic+-is:promo+-is:digital`);
+  }
   const cards = rawCards.map(toPackCard).filter((c): c is PackCard => c !== null).sort(cnCompare);
-  if (cards.length === 0) throw new Error(`set "${code}" has no booster cards`);
-  const rawBasics = await searchAll(`set:${code}+is:booster+t:basic`);
+  if (cards.length === 0) throw new Error(`set "${code}" has no cards on Scryfall yet`);
   const basics = rawBasics.map(toPackCard).filter((c): c is PackCard => c !== null).sort(cnCompare);
+  void boosterFlagged;
 
   const data: RuntimeSetData = {
     code,

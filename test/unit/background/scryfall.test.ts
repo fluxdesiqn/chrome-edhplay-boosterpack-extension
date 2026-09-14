@@ -19,6 +19,8 @@ import { installChromeStorage, installFetch, type Route } from './stubs';
 const SEARCH = `${SCRYFALL_BASE}/cards/search?q=`;
 const nonBasicUrl = (code: string): string => `${SEARCH}set:${code}+is:booster+-t:basic&unique=prints&order=set`;
 const basicUrl = (code: string): string => `${SEARCH}set:${code}+is:booster+t:basic&unique=prints&order=set`;
+const fallbackUrl = (code: string): string => `${SEARCH}set:${code}+-t:basic+-is:promo+-is:digital&unique=prints&order=set`;
+const fallbackBasicUrl = (code: string): string => `${SEARCH}set:${code}+t:basic+-is:promo+-is:digital&unique=prints&order=set`;
 const PAGE2 = `${SCRYFALL_BASE}/cards/search?format=json&page=2&q=set%3Azzz`;
 
 const card = (over: Record<string, unknown>): Record<string, unknown> => ({
@@ -113,7 +115,30 @@ function routes(): Record<string, Route> {
       },
     },
     [nonBasicUrl('empty')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
+    [fallbackUrl('empty')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
+    [fallbackBasicUrl('empty')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
     [`${SCRYFALL_BASE}/sets/empty`]: { status: 200, body: { code: 'empty', name: 'Empty', set_type: 'expansion', card_count: 0 } },
+    // A brand-new set: Scryfall has not flagged booster contents yet.
+    [`${SCRYFALL_BASE}/sets/tmt`]: { status: 200, body: { code: 'tmt', name: 'Teenage Mutant Ninja Turtles', set_type: 'expansion', card_count: 320, released_at: '2026-03-06' } },
+    [nonBasicUrl('tmt')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
+    [fallbackUrl('tmt')]: {
+      status: 200,
+      body: {
+        object: 'list',
+        has_more: false,
+        data: [
+          card({ id: 'tmt-1', name: 'Leonardo', collector_number: '1', set: 'tmt', rarity: 'mythic' }),
+          card({ id: 'tmt-1s', name: 'Leonardo', collector_number: '301', set: 'tmt', rarity: 'mythic', frame_effects: ['showcase'] }),
+          card({ id: 'tmt-2', name: 'Pizza', collector_number: '2', set: 'tmt', rarity: 'common' }),
+          card({ id: 'tmt-2e', name: 'Pizza', collector_number: '355', set: 'tmt', rarity: 'common', frame_effects: ['extendedart'] }),
+          card({ id: 'tmt-3', name: 'Sewer Lair', collector_number: '3', set: 'tmt', rarity: 'uncommon' }),
+        ],
+      },
+    },
+    [fallbackBasicUrl('tmt')]: {
+      status: 200,
+      body: { object: 'list', has_more: false, data: [card({ id: 'tmt-b', name: 'Forest', collector_number: '310', set: 'tmt', type_line: 'Basic Land — Forest', rarity: 'common' })] },
+    },
   };
 }
 
@@ -237,7 +262,7 @@ describe('scryfall background client', () => {
     expect(unknown.error).toMatch(/unknown set "nope"/);
     const empty = await loadSetCards('empty');
     expect(empty.data).toBeNull();
-    expect(empty.error).toMatch(/no booster cards/);
+    expect(empty.error).toMatch(/no cards on Scryfall yet/);
     // nothing cached for failures
     expect(await cacheGet(setCardsCacheKey('nope'))).toBeNull();
     expect(await cacheGet(setCardsCacheKey('empty'))).toBeNull();
@@ -245,6 +270,20 @@ describe('scryfall background client', () => {
     const ok = await loadSetCards('zzz');
     expect(ok.error).toBeUndefined();
     expect(ok.data?.cards).toHaveLength(5);
+  });
+
+  it('falls back to regular printings when Scryfall has no booster flags for a new set', async () => {
+    const f = installFetch(routes());
+    const r = await loadSetCards('tmt');
+    expect(r.error).toBeUndefined();
+    const data = r.data!;
+    // one printing per name, lowest collector number wins (showcase/extended variants dropped)
+    expect(data.cards.map((c) => c.cn)).toEqual(['1', '2', '3']);
+    expect(data.cards.map((c) => c.id)).toEqual(['tmt-1', 'tmt-2', 'tmt-3']);
+    expect(data.basics).toHaveLength(1);
+    expect(data.hasMythics).toBe(true);
+    expect(data.packSize).toBe(14);
+    expect(f.calls.some((u) => u === fallbackUrl('tmt'))).toBe(true);
   });
 
   it('toPackCard / cnCompare helpers', () => {

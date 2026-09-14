@@ -118,6 +118,7 @@ function GameTab({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: P
           onConfirm={(ids) => {
             mulliganChoose.value = null;
             send({ type: 'cmd', cmd: 'mulligan-bottom', ids });
+            send({ type: 'cmd', cmd: 'mulligan-keep' });
           }}
           onMulliganAgain={() => {
             mulliganChoose.value = null;
@@ -313,6 +314,16 @@ function MulliganSection({ send, st }: { send: (m: IsoToMain) => void; st: NonNu
   const next = st.mulligans + 1;
   const bottom = config.value.freeFirstMulligan ? Math.max(0, next - 1) : next;
   const blocked = !p.deckSubmitted ? 'Submit your deck first.' : p.mulliganActive && !p.decisionMade ? 'Keep your hand in edhplay first; then mulligan from here.' : null;
+  if (st.mulliganDone) {
+    return (
+      <div class="hok-section">
+        <div class="hok-row">
+          <span class="hok-muted">Hand kept{st.mulligans > 0 ? ` after ${st.mulligans} mulligan${st.mulligans === 1 ? '' : 's'}` : ''}.</span>
+          <button class="hok-iconbtn" title="Change my mind" onClick={() => send({ type: 'cmd', cmd: 'mulligan-reopen' })}>↺</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div class="hok-section">
       <p class="hok-h">Mulligan (Commander rules)</p>
@@ -323,9 +334,14 @@ function MulliganSection({ send, st }: { send: (m: IsoToMain) => void; st: NonNu
       {blocked && <div class="hok-note warn">{blocked}</div>}
       {running && <div class="hok-muted">{s?.step}</div>}
       {s?.seq === 'mulligan' && s.error && <div class="hok-note err">{s.error}</div>}
-      <button class="hok-btn secondary block sm" disabled={running || !!blocked} onClick={() => send({ type: 'cmd', cmd: 'mulligan' })}>
-        Mulligan {next}
-      </button>
+      <div class="hok-row">
+        <button class="hok-btn secondary sm" disabled={running || !!blocked} onClick={() => send({ type: 'cmd', cmd: 'mulligan' })}>
+          Mulligan {next}
+        </button>
+        <button class="hok-btn sm" disabled={running || !p.deckSubmitted} onClick={() => send({ type: 'cmd', cmd: 'mulligan-keep' })}>
+          I'm happy with my hand
+        </button>
+      </div>
     </div>
   );
 }
