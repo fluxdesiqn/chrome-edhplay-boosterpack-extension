@@ -626,6 +626,7 @@ export class Engine {
       this.diag('info', `sweep done: ${out.reservoir.length} blanks in reservoir`);
       this.bridge.send({ type: 'seq', seq: 'sweep', step: 'Done', pct: 1, done: true });
       this.sync.enqueueState(this.stateMessage());
+      this.promptKeepOrMulligan();
     } catch (err) {
       let msg = err instanceof Error ? err.message : String(err);
       const cur = this.state ?? s;
@@ -798,6 +799,32 @@ export class Engine {
 
   // ------------------------------------------------------------------ mulligan (Commander rules, after the sweep)
 
+  private handSummaries(ids: string[]): CardSummary[] {
+    return ids
+      .map((id) => this.zones.get(id))
+      .filter((c): c is NonNullable<typeof c> => !!c)
+      .map((c) => ({
+        id: c.id,
+        card_print_id: String(c.card.card_print_id ?? ''),
+        name: String(c.card.name ?? ''),
+        type_line: String(c.card.type_line ?? ''),
+        zone: c.zone,
+        ownerId: c.ownerId,
+        faceDown: c.faceDown,
+        front_image_uri: String(c.card.front_image_uri ?? ''),
+      }));
+  }
+
+  /** Right after the sweep: show the fresh hand and ask keep-or-mulligan. */
+  private promptKeepOrMulligan(): void {
+    const s = this.state;
+    const me = this.localId;
+    if (!s || !me || s.mulliganDone) return;
+    const hand = this.handSummaries(this.zones.cardsIn('hand', me).map((c) => c.id));
+    if (!hand.length) return;
+    this.bridge.send({ type: 'mulligan-choose', hand, bottom: 0, mulligans: s.mulligans });
+  }
+
   private async startMulligan(): Promise<void> {
     const s = this.state;
     const me = this.localId;
@@ -825,20 +852,7 @@ export class Engine {
       });
       this.state = { ...(this.state ?? s), mulligans: n, mulliganDone: false, updatedAt: Date.now() };
       this.pushState();
-      const hand: CardSummary[] = out.hand
-        .map((id) => this.zones.get(id))
-        .filter((c): c is NonNullable<typeof c> => !!c)
-        .map((c) => ({
-          id: c.id,
-          card_print_id: String(c.card.card_print_id ?? ''),
-          name: String(c.card.name ?? ''),
-          type_line: String(c.card.type_line ?? ''),
-          zone: c.zone,
-          ownerId: c.ownerId,
-          faceDown: c.faceDown,
-          front_image_uri: String(c.card.front_image_uri ?? ''),
-        }));
-      this.bridge.send({ type: 'mulligan-choose', hand, bottom, mulligans: n });
+      this.bridge.send({ type: 'mulligan-choose', hand: this.handSummaries(out.hand), bottom, mulligans: n });
       this.bridge.send({ type: 'seq', seq: 'mulligan', step: bottom ? `Choose ${bottom} card(s) for the bottom` : 'Free mulligan: keep all', pct: 1, done: true });
     } catch (err) {
       const text = this.lastServerError ? `edhplay refused: ${this.lastServerError}` : err instanceof Error ? err.message : String(err);

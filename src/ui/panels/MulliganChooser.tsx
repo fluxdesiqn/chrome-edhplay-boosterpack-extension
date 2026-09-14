@@ -19,6 +19,9 @@ export interface MulliganChooserProps {
 
 function ruleLine(p: MulliganChooserProps): string {
   const { bottom, mulligans, freeFirst, hand } = p;
+  if (mulligans === 0) {
+    return `Your opening hand after the sweep (${hand.length} cards). Keep it, or mulligan? ${freeFirst ? 'The first mulligan is free in Commander.' : ''}`.trim();
+  }
   if (bottom === 0) {
     return freeFirst && mulligans === 1 ? `Mulligan 1 is free in Commander: keep all ${hand.length}` : `Mulligan ${mulligans}: keep all ${hand.length}`;
   }
@@ -76,7 +79,7 @@ export function MulliganChooser(props: MulliganChooserProps): JSX.Element {
         </button>
         {onMulliganAgain && (
           <button type="button" class="hok-btn secondary block sm hok-mc-again" disabled={!!busy} onClick={onMulliganAgain}>
-            Mulligan again
+            {mulligans === 0 ? 'Mulligan' : 'Mulligan again'}
           </button>
         )}
       </div>

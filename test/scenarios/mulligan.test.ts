@@ -29,11 +29,17 @@ describe('mulligan', () => {
     expect(server.zone(P1, 'hand').some((c) => c.name === 'Wastes')).toBe(false);
     const libBefore = server.zone(P1, 'library').length;
     const firstHand = server.zone(P1, 'hand').map((c) => c.id);
+    // The sweep ends with a keep-or-mulligan prompt showing the fresh hand.
+    await until(() => w.iso.of('mulligan-choose').length === 1, 'post-sweep prompt');
+    const prompt = w.iso.of('mulligan-choose')[0]!;
+    expect(prompt.mulligans).toBe(0);
+    expect(prompt.bottom).toBe(0);
+    expect(new Set(prompt.hand.map((c) => c.id))).toEqual(new Set(firstHand));
 
     // Mulligan 1: free.
     w.send({ type: 'cmd', cmd: 'mulligan' });
-    await until(() => w.iso.of('mulligan-choose').length === 1, 'chooser 1');
-    const c1 = w.iso.of('mulligan-choose')[0]!;
+    await until(() => w.iso.of('mulligan-choose').length === 2, 'chooser 1');
+    const c1 = w.iso.of('mulligan-choose')[1]!;
     expect(c1.mulligans).toBe(1);
     expect(c1.bottom).toBe(0);
     expect(c1.hand).toHaveLength(7);
@@ -52,8 +58,8 @@ describe('mulligan', () => {
 
     // Mulligan 2: one card to the bottom.
     w.send({ type: 'cmd', cmd: 'mulligan' });
-    await until(() => w.iso.of('mulligan-choose').length === 2, 'chooser 2');
-    const c2 = w.iso.of('mulligan-choose')[1]!;
+    await until(() => w.iso.of('mulligan-choose').length === 3, 'chooser 2');
+    const c2 = w.iso.of('mulligan-choose')[2]!;
     expect(c2.mulligans).toBe(2);
     expect(c2.bottom).toBe(1);
     const victim = c2.hand[3]!.id;
