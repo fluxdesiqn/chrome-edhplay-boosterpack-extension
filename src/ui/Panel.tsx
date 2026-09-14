@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { IsoToMain } from '@shared/bridge-contract';
-import { SET_CODES, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
+import { SET_CODES, availablePacks, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
 import { config, diags, ledger, mulliganChoose, needsReload, offer, peers, phase, pileView, readOnly, requestSetList, screen, seq, setList, setListError, setListLoader, socket, state, zones } from './machine';
 import { SetPicker } from './panels/SetPicker';
 import { PileView } from './panels/PileView';
@@ -152,37 +152,32 @@ function GameTab({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: P
   );
 }
 
-function DeckCheck({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: PanelProps['onConfig'] }) {
+function DeckCheck({ send }: { send: (m: IsoToMain) => void; onConfig: PanelProps['onConfig'] }) {
   const st = state.value;
   const p = phase.value;
   const reason = st?.sweep.reason ?? st?.sweep.error;
   const basics = countBasicsInHand();
+  const kept = p.deckSubmitted && (p.decisionMade || !p.mulliganActive);
   return (
     <div class="hok-section">
       <p class="hok-h">Deck check</p>
       {!p.deckSubmitted && <div class="hok-note">Submit your deck first. It must contain {config.value.minBlankCopies} copies of one basic land (Wastes by default) and the room must be Free Commander.</div>}
       {p.deckSubmitted && p.mulliganActive && !p.decisionMade && (
         <div class="hok-note">
-          <b>Keep your opening hand in edhplay first</b> (do not mulligan there; edhplay blocks library actions until you decide). The sweep {config.value.autoSweep ? 'starts automatically' : 'can run'} right after your keep, and you can mulligan from this panel afterwards with Commander rules.
+          <b>Keep your opening hand in edhplay first</b> (do not mulligan there; edhplay blocks library actions until you decide). The blanks are swept away automatically right after your keep, and you mulligan from this panel afterwards with Commander rules.
           {basics > 0 && <div>Blanks in your hand now: {basics}. They are swept away and replaced.</div>}
         </div>
       )}
-      {p.deckSubmitted && (p.decisionMade || !p.mulliganActive) && (
-        <div class="hok-note warn">
-          {reason ?? 'Placeholder not detected yet. The sweep will scan your library when you start it.'}
-        </div>
-      )}
+      {kept && <div class="hok-note warn">{reason ?? 'The sweep has not run yet.'}</div>}
       <div class="hok-row">
         <span class="hok-muted">Placeholder</span>
         <span>{st?.placeholderName ?? config.value.preferredPlaceholderName}</span>
       </div>
-      <button class="hok-btn block" disabled={!p.deckSubmitted || (p.mulliganActive && !p.decisionMade)} onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
-        Scan library and sweep blanks
-      </button>
-      <label class="hok-check">
-        <input type="checkbox" checked={config.value.autoSweep} onChange={(e) => onConfig({ autoSweep: (e.target as HTMLInputElement).checked })} />
-        Sweep automatically after I keep my hand
-      </label>
+      {kept && (
+        <button class="hok-btn block" onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
+          Sweep blanks now
+        </button>
+      )}
     </div>
   );
 }
@@ -193,18 +188,16 @@ function countBasicsInHand(): number {
   return z.cards.filter((c) => c.ownerId === z.localPlayerId && c.zone === 'hand' && c.type_line.startsWith('Basic Land')).length;
 }
 
-function Sweep({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: PanelProps['onConfig'] }) {
+function Sweep({ send }: { send: (m: IsoToMain) => void; onConfig: PanelProps['onConfig'] }) {
   const st = state.value!;
   const s = seq.value;
-  const p = phase.value;
   const running = st.sweep.phase === 'running';
   return (
     <div class="hok-section">
-      <p class="hok-h">Sweep blanks</p>
+      <p class="hok-h">Sweeping blanks</p>
       <div class="hok-note">
-        Moves every {st.placeholderName ?? 'placeholder'} out of your library and hand into a face-down exile pile, then refills your hand. Runs after you keep in edhplay; mulligan from this panel afterwards.
+        Moving every {st.placeholderName ?? 'placeholder'} out of your library and hand into a face-down exile pile, then refilling your hand.
       </div>
-      {p.mulliganActive && !p.decisionMade && <div class="hok-note warn">Keep your hand in edhplay first. edhplay blocks library actions until your mulligan decision is made.</div>}
       {running && s?.seq === 'sweep' && (
         <div>
           <div class="hok-muted">{s.step}</div>
@@ -213,15 +206,9 @@ function Sweep({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: Pan
       )}
       {st.sweep.error && <div class="hok-note err">{st.sweep.error}</div>}
       <div class="hok-row">
-        <button class="hok-btn" disabled={running || (p.mulliganActive && !p.decisionMade)} onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>
-          {st.sweep.phase === 'failed' ? 'Retry sweep' : 'Sweep now'}
-        </button>
+        {!running && <button class="hok-btn" onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>Retry sweep</button>}
         {running && <button class="hok-btn secondary sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel</button>}
       </div>
-      <label class="hok-check">
-        <input type="checkbox" checked={config.value.autoSweep} onChange={(e) => onConfig({ autoSweep: (e.target as HTMLInputElement).checked })} />
-        Sweep automatically after I keep my hand
-      </label>
     </div>
   );
 }
@@ -300,7 +287,6 @@ function Ready({ send, st }: { send: (m: IsoToMain) => void; st: NonNullable<typ
       <div class="hok-section">
         <div class="hok-row">
           <button class="hok-btn secondary sm" onClick={() => send({ type: 'cmd', cmd: 'rebroadcast' })}>Re-send mappings</button>
-          <button class="hok-btn secondary sm" onClick={() => send({ type: 'cmd', cmd: 'sweep' })}>Sweep stragglers</button>
         </div>
       </div>
     </div>
@@ -440,6 +426,11 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
   const [kind, setKind] = useState<PackKind>('draft');
   useEffect(() => requestSetList(), []);
   const loading = seq.value?.seq === 'activate' && /Loading/.test(seq.value.step) && !seq.value.error && !seq.value.done;
+  const randomKamigawa = (): { set: SetCode; kind: PackKind } => {
+    const products: Array<{ set: SetCode; kind: PackKind }> = [];
+    for (const code of SET_CODES) for (const k of availablePacks(code)) products.push({ set: code, kind: k });
+    return products[Math.floor(Math.random() * products.length)]!;
+  };
   const randomSet = (): SetCode => {
     const pool = (setList.value && setList.value.length ? setList.value.map((s2) => s2.code) : [...SET_CODES]) as SetCode[];
     return pool[Math.floor(Math.random() * pool.length)]!;
@@ -455,6 +446,7 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
         onChange={(s2, k) => { setSet(s2); setKind(k); }}
         onRefresh={() => { setList.value = null; setListLoader.load?.(); }}
         onRandom={() => { setSet(randomSet()); setKind('draft'); }}
+        onRandomKamigawa={() => { const r = randomKamigawa(); setSet(r.set); setKind(r.kind); }}
         error={setListError.value}
       />
       {st.mode === 'heroes' && !SET_CODES.includes(set as never) && (
@@ -466,9 +458,14 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
         {loading ? 'Loading card list…' : `Open ${packLabel(set, kind)}`}
       </button>
       <div style={{ height: 6 }} />
-      <button class="hok-btn secondary block sm" disabled={loading} onClick={() => { const r = randomSet(); setSet(r); setKind('draft'); send({ type: 'cmd', cmd: 'activate', set: r, kind: 'draft' }); }}>
-        🎲 Open a random pack
-      </button>
+      <div class="hok-row">
+        <button class="hok-btn secondary sm" disabled={loading} onClick={() => { const r = randomKamigawa(); setSet(r.set); setKind(r.kind); send({ type: 'cmd', cmd: 'activate', set: r.set, kind: r.kind }); }} title="Any of the six Kamigawa products, Collector Booster included">
+          🎲 Random Kamigawa pack
+        </button>
+        <button class="hok-btn secondary sm" disabled={loading} onClick={() => { const r = randomSet(); setSet(r); setKind('draft'); send({ type: 'cmd', cmd: 'activate', set: r, kind: 'draft' }); }} title="Any set on Scryfall">
+          🎲 Random any set
+        </button>
+      </div>
       {st.mode === 'heroes' && (
         <div>
           <div style={{ height: 6 }} />

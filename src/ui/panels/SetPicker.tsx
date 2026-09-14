@@ -16,6 +16,8 @@ export interface SetPickerProps {
   onRefresh?: () => void;
   /** pick a random set from the list */
   onRandom?: () => void;
+  /** pick a random Kamigawa product (set + booster kind, Collector included) */
+  onRandomKamigawa?: () => void;
   error?: string;
 }
 
@@ -41,7 +43,7 @@ function yearOf(released: string): string {
 
 /** Bundled sets, recent chips and a searchable list of every Scryfall set, plus the booster-kind pills. */
 export function SetPicker(props: SetPickerProps): JSX.Element {
-  const { sets, recent, value, kind, onChange, onRefresh, onRandom, error } = props;
+  const { sets, recent, value, kind, onChange, onRefresh, onRandom, onRandomKamigawa, error } = props;
   const releasedOf = (code: string): string | undefined => sets?.find((s) => s.code === code)?.released;
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
@@ -105,6 +107,11 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
             {SET_NAMES[code]}
           </button>
         ))}
+        {onRandomKamigawa && (
+          <button type="button" class="hok-btn secondary" onClick={onRandomKamigawa} title="Champions, Betrayers, Saviors, or Neon Dynasty Draft / Set / Collector">
+            🎲 Random Kamigawa
+          </button>
+        )}
       </div>
 
       {showRecent && (

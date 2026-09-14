@@ -167,7 +167,8 @@ export interface CardSummary {
 }
 
 export interface Config {
-  autoSweep: boolean;
+  /** @deprecated the sweep always runs after the keep; kept so stored configs still parse */
+  autoSweep?: boolean;
   /** Commander multiplayer rule: the first mulligan puts nothing on the bottom. */
   freeFirstMulligan: boolean;
   /** Recently used runtime set codes for the pack chooser. */
@@ -180,7 +181,6 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
-  autoSweep: true,
   freeFirstMulligan: true,
   recentSets: [],
   defaultSet: 'neo',

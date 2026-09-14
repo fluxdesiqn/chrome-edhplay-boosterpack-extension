@@ -569,7 +569,7 @@ export class Engine {
 
   private maybeAutoSweep(): void {
     const s = this.state;
-    if (!s || !this.config.autoSweep) return;
+    if (!s) return;
     if (s.sweep.phase === 'done' || s.sweep.phase === 'running') return;
     if (this.phase.deckSubmitted && this.phase.decisionMade && this.phase.handCount > 0) void this.startSweep();
   }
