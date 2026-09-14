@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { SetSummary } from '@shared/packs/runtime';
-import { PACK_KINDS, SET_CODES, SET_NAMES, availablePacks, isBundledSet, kindName, setName, type PackKind } from '@shared/packs/types';
+import { KIND_SHORT_NAMES, SELECTABLE_KINDS, SET_CODES, SET_NAMES, availablePacks, isBundledSet, kindName, setName, type PackKind } from '@shared/packs/types';
 
 export interface SetPickerProps {
   /** null = still loading */
@@ -14,10 +14,8 @@ export interface SetPickerProps {
   onChange: (set: string, kind: PackKind) => void;
   /** reload the set list */
   onRefresh?: () => void;
-  /** pick a random set from the list */
-  onRandom?: () => void;
-  /** pick a random Kamigawa product (set + booster kind, Collector included) */
-  onRandomKamigawa?: () => void;
+  /** show the bundled Kamigawa sets row (Heroes mode); default true */
+  showKamigawa?: boolean;
   error?: string;
 }
 
@@ -43,7 +41,8 @@ function yearOf(released: string): string {
 
 /** Bundled sets, recent chips and a searchable list of every Scryfall set, plus the booster-kind pills. */
 export function SetPicker(props: SetPickerProps): JSX.Element {
-  const { sets, recent, value, kind, onChange, onRefresh, onRandom, onRandomKamigawa, error } = props;
+  const { sets, recent, value, kind, onChange, onRefresh, error } = props;
+  const showKamigawa = props.showKamigawa !== false;
   const releasedOf = (code: string): string | undefined => sets?.find((s) => s.code === code)?.released;
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
@@ -100,19 +99,18 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
 
   return (
     <div class="hok-sp">
-      <p class="hok-h">Kamigawa</p>
-      <div class="hok-sets">
-        {SET_CODES.map((code) => (
-          <button type="button" class={`hok-btn secondary ${value === code ? 'selected' : ''}`} aria-pressed={value === code} onClick={() => select(code)}>
-            {SET_NAMES[code]}
-          </button>
-        ))}
-        {onRandomKamigawa && (
-          <button type="button" class="hok-btn secondary" onClick={onRandomKamigawa} title="Champions, Betrayers, Saviors, or Neon Dynasty Draft / Set / Collector">
-            🎲 Random Kamigawa
-          </button>
-        )}
-      </div>
+      {showKamigawa && (
+        <div class="hok-sp-block">
+          <p class="hok-h">Kamigawa</p>
+          <div class="hok-sets">
+            {SET_CODES.map((code) => (
+              <button type="button" class={`hok-btn secondary ${value === code ? 'selected' : ''}`} aria-pressed={value === code} onClick={() => select(code)}>
+                {SET_NAMES[code]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showRecent && (
         <div class="hok-sp-block">
@@ -190,17 +188,10 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
         )}
       </div>
 
-      {onRandom && (
-        <div class="hok-sp-block">
-          <button type="button" class="hok-btn secondary block sm" disabled={!sets || sets.length === 0} onClick={onRandom} title="Pick a random set from the whole list">
-            🎲 Random set
-          </button>
-        </div>
-      )}
       <div class="hok-sp-block">
         <p class="hok-h">Booster</p>
         <div class="hok-kinds hok-sp-kinds">
-          {PACK_KINDS.map((k) => {
+          {SELECTABLE_KINDS.map((k) => {
             const ok = kinds.includes(k);
             return (
               <button
@@ -211,7 +202,7 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
                 title={ok ? '' : `${nameOf(value)} was not sold as ${kindName(value, k, releasedOf(value))}s`}
                 onClick={() => onChange(value, k)}
               >
-                {kindName(value, k, releasedOf(value))}
+                {KIND_SHORT_NAMES[k]}
               </button>
             );
           })}

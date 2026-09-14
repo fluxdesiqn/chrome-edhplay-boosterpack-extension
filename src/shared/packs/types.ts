@@ -22,7 +22,10 @@ export type Rarity = 'c' | 'u' | 'r' | 'm';
 /** Booster products. Only Neon Dynasty was sold as Set and Collector boosters. */
 export type PackKind = 'draft' | 'set' | 'collector';
 export const PACK_KINDS: readonly PackKind[] = ['draft', 'set', 'collector'];
-export const PACK_KIND_NAMES: Record<PackKind, string> = { draft: 'Draft Booster', set: 'Set Booster', collector: 'Collector Booster' };
+export const PACK_KIND_NAMES: Record<PackKind, string> = { draft: 'Play Booster', set: 'Set Booster', collector: 'Collector Booster' };
+/** Kinds a player can choose. The standard booster ("Play") resolves to a Draft (15) or Play (14) booster internally. */
+export const SELECTABLE_KINDS: readonly PackKind[] = ['draft', 'collector'];
+export const KIND_SHORT_NAMES: Record<PackKind, string> = { draft: 'Play', set: 'Set', collector: 'Collector' };
 export const AVAILABLE_PACKS: Record<BundledSet, readonly PackKind[]> = {
   chk: ['draft'],
   bok: ['draft'],
@@ -55,7 +58,8 @@ export function isPlayBoosterSet(set: SetCode, released?: string): boolean {
 }
 /** The booster name a player would recognise: the draft-style pack is a "Play Booster" for modern sets. */
 export function kindName(set: SetCode, kind: PackKind, released?: string): string {
-  if (kind === 'draft') return isPlayBoosterSet(set, released) ? 'Play Booster' : 'Draft Booster';
+  void set;
+  void released;
   return PACK_KIND_NAMES[kind];
 }
 export function packLabel(set: SetCode, kind: PackKind): string {

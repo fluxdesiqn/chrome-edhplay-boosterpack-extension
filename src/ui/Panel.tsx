@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { IsoToMain } from '@shared/bridge-contract';
-import { SET_CODES, availablePacks, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
+import { SELECTABLE_KINDS, SET_CODES, availablePacks, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
 import { config, diags, ledger, mulliganChoose, needsReload, offer, peers, phase, pileView, readOnly, requestSetList, screen, seq, setList, setListError, setListLoader, socket, state, zones } from './machine';
 import { SetPicker } from './panels/SetPicker';
 import { PileView } from './panels/PileView';
@@ -422,34 +422,35 @@ function Activate({ send }: { send: (m: IsoToMain) => void }) {
 
 function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
   const st = state.value!;
-  const [set, setSet] = useState<SetCode>(config.value.defaultSet);
+  const heroes = st.mode === 'heroes';
+  const [set, setSet] = useState<SetCode>(heroes ? config.value.defaultSet : (config.value.recentSets[0] ?? config.value.defaultSet));
   const [kind, setKind] = useState<PackKind>('draft');
   useEffect(() => requestSetList(), []);
   const loading = seq.value?.seq === 'activate' && /Loading/.test(seq.value.step) && !seq.value.error && !seq.value.done;
-  const randomKamigawa = (): { set: SetCode; kind: PackKind } => {
-    const products: Array<{ set: SetCode; kind: PackKind }> = [];
-    for (const code of SET_CODES) for (const k of availablePacks(code)) products.push({ set: code, kind: k });
-    return products[Math.floor(Math.random() * products.length)]!;
-  };
-  const randomSet = (): SetCode => {
+  /** Heroes: one of the Kamigawa products (Play boosters of all four sets + the Neon Dynasty Collector Booster). Otherwise any set. */
+  const randomPack = (): { set: SetCode; kind: PackKind } => {
+    if (heroes) {
+      const products: Array<{ set: SetCode; kind: PackKind }> = [];
+      for (const code of SET_CODES) for (const k of availablePacks(code)) if (SELECTABLE_KINDS.includes(k)) products.push({ set: code, kind: k });
+      return products[Math.floor(Math.random() * products.length)]!;
+    }
     const pool = (setList.value && setList.value.length ? setList.value.map((s2) => s2.code) : [...SET_CODES]) as SetCode[];
-    return pool[Math.floor(Math.random() * pool.length)]!;
+    return { set: pool[Math.floor(Math.random() * pool.length)]!, kind: 'draft' };
   };
   return (
     <div class="hok-section">
-      <p class="hok-h">{st.mode === 'deck' ? 'Open a booster into your second deck' : 'Open up to one sealed booster'}</p>
+      <p class="hok-h">{heroes ? 'Open up to one sealed booster' : 'Open a booster into your second deck'}</p>
       <SetPicker
         sets={setList.value}
         recent={config.value.recentSets}
         value={set}
         kind={kind}
+        showKamigawa={heroes}
         onChange={(s2, k) => { setSet(s2); setKind(k); }}
         onRefresh={() => { setList.value = null; setListLoader.load?.(); }}
-        onRandom={() => { setSet(randomSet()); setKind('draft'); }}
-        onRandomKamigawa={() => { const r = randomKamigawa(); setSet(r.set); setKind(r.kind); }}
         error={setListError.value}
       />
-      {st.mode === 'heroes' && !SET_CODES.includes(set as never) && (
+      {heroes && !SET_CODES.includes(set as never) && (
         <div class="hok-note warn">Heroes of Kamigawa says "Kamigawa booster pack". Opening {setName(set)} is a house rule; make sure your pod agrees.</div>
       )}
       {seq.value?.seq === 'activate' && seq.value.error && <div class="hok-note err">{seq.value.error}</div>}
@@ -458,15 +459,10 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
         {loading ? 'Loading card list…' : `Open ${packLabel(set, kind)}`}
       </button>
       <div style={{ height: 6 }} />
-      <div class="hok-row">
-        <button class="hok-btn secondary sm" disabled={loading} onClick={() => { const r = randomKamigawa(); setSet(r.set); setKind(r.kind); send({ type: 'cmd', cmd: 'activate', set: r.set, kind: r.kind }); }} title="Any of the six Kamigawa products, Collector Booster included">
-          🎲 Random Kamigawa pack
-        </button>
-        <button class="hok-btn secondary sm" disabled={loading} onClick={() => { const r = randomSet(); setSet(r); setKind('draft'); send({ type: 'cmd', cmd: 'activate', set: r, kind: 'draft' }); }} title="Any set on Scryfall">
-          🎲 Random any set
-        </button>
-      </div>
-      {st.mode === 'heroes' && (
+      <button class="hok-btn secondary block sm" disabled={loading} onClick={() => { const r = randomPack(); setSet(r.set); setKind(r.kind); send({ type: 'cmd', cmd: 'activate', set: r.set, kind: r.kind }); }} title={heroes ? 'Any Kamigawa booster, Collector included' : 'A Play Booster from any set'}>
+        🎲 Random pack
+      </button>
+      {heroes && (
         <div>
           <div style={{ height: 6 }} />
           <button class="hok-btn secondary block sm" onClick={() => send({ type: 'cmd', cmd: 'activate', set: null })}>No pack, just look at the pile</button>

@@ -66,7 +66,7 @@ describe('PackReveal', () => {
   it('renders the header with owner name, pack label and pack number', () => {
     const el = mount();
     const title = el.querySelector('.hok-reveal-title')!;
-    expect(title.textContent).toBe('Alice opened a Kamigawa: Neon Dynasty Draft Booster');
+    expect(title.textContent).toBe('Alice opened a Kamigawa: Neon Dynasty Play Booster');
     expect(el.querySelector('.hok-reveal-pill')!.textContent).toBe('Pack #2');
     expect(el.querySelector('.hok-reveal')!.className).toContain('hok-reveal--neo');
     expect(el.querySelector('.hok-reveal')!.className).toContain('hok-reveal--draft');
