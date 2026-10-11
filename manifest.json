@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Heroes of Kamigawa for EDHPlay",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Open sealed Kamigawa boosters at the table: adds the Heroes of Kamigawa booster-pile mechanic to edhplay.com games.",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],

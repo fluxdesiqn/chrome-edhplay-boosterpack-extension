@@ -1,6 +1,6 @@
 {
   "name": "edhplay-heroes-of-kamigawa",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Chrome extension that adds the Heroes of Kamigawa booster-pack mechanic to edhplay.com",
   "type": "module",
