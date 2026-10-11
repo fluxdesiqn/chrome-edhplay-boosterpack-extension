@@ -52,14 +52,18 @@ export const PACK_SIZE: Record<PackKind, number> = { draft: 15, set: 12, collect
 export const GENERIC_PACK_SIZE = 15;
 /** Generic draft template: chance the rare slot is a mythic. */
 export const GENERIC_MYTHIC_ODDS: Odds = [1, 8];
+/** Generic Collector Booster (runtime sets): 15 cards. */
+export const GENERIC_COLLECTOR_SIZE = 15;
 
 /**
  * Number of cards `rollPackOfKind(set, kind, …)` produces. Bundled sets use the
- * product sizes; runtime sets use the `packSize` hint of their data (15 when the
- * set is not registered yet).
+ * product sizes; runtime sets use the `packSize` hint of their data for the
+ * draft-style pack (15 when the set is not registered yet) and 15 for a
+ * Collector Booster.
  */
 export function packSize(set: SetCode, kind: PackKind, data: AnySetData | undefined = getSetData(set)): number {
   if (isBundledSet(set) || !data || !isRuntimeSetData(data)) return PACK_SIZE[kind];
+  if (kind === 'collector') return GENERIC_COLLECTOR_SIZE;
   return data.packSize === 14 ? 14 : GENERIC_PACK_SIZE;
 }
 
@@ -117,7 +121,7 @@ export interface Pools {
   /** Common cards whose type line starts with "Land" (NEO gain lands). */
   duals: PackCard[];
   basics: PackCard[];
-  /** Collector-booster-only alternate printings (NEO). Empty for other sets. */
+  /** Alternate-frame printings (bundled NEO data, or the `variants` of a runtime set). Empty for other sets. */
   variants: PackCard[];
   /** `variants` with `v === 's'` */
   showcase: PackCard[];
@@ -334,6 +338,71 @@ function rollCollector(set: SetCode, rng: Rng, pools: Pools): { cards: PackCard[
 }
 
 // ---------------------------------------------------------------------------
+// Generic Collector Booster (runtime sets, 15 cards)
+// ---------------------------------------------------------------------------
+
+/** 0-based indices of the foil slots in a generic Collector Booster. */
+export const GENERIC_COLLECTOR_FOIL_SLOTS: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 11, 12, 13, 14];
+
+/**
+ * A Collector Booster for a set without a hand-written template, modelled on
+ * the premier-set layout since Throne of Eldraine and derived from the data
+ * alone so peers re-roll the same pack from the same Scryfall snapshot:
+ *
+ *   0        foil basic land
+ *   1–4      foil regular commons/uncommons (1/2 uncommon each)
+ *   5–6      foil showcase/borderless commons/uncommons
+ *   7–8      showcase/borderless commons/uncommons
+ *   9        extended-art rare/mythic
+ *   10       showcase/borderless rare/mythic
+ *   11       foil extended-art rare/mythic
+ *   12       foil showcase/borderless rare/mythic
+ *   13       foil-etched rare/mythic
+ *   14       foil regular rare/mythic (mythic with the generic 1/8 odds)
+ *
+ * Every slot falls back through the next-best pools (other alternate frames,
+ * then the regular printing of that rarity band, then uncommons and commons) so
+ * a set with few or no alternate printings still yields 15 distinct cards. Each
+ * slot is exactly one `nextInt` (plus one for each 1/2 or mythic roll), so the
+ * RNG stream is a pure function of the data.
+ */
+function rollGenericCollector(set: SetCode, rng: Rng, pools: Pools, template: PackTemplate): { cards: PackCard[]; foil: number[] } {
+  const draw = new Drawer(rng, `${set}/collector`);
+  const cards: PackCard[] = [];
+
+  const altCU = pools.variants.filter(isCommonOrUncommon);
+  const altRM = pools.variants.filter(isRareOrMythic);
+  const framedCU = altCU.filter((c) => c.v === 's' || c.v === 'b');
+  const framedRM = altRM.filter((c) => c.v === 's' || c.v === 'b');
+  const extendedRM = pools.extended.filter(isRareOrMythic);
+  const etchedRM = pools.etched.filter(isRareOrMythic);
+  const regularCU = [...pools.uncommon, ...pools.common];
+  const regularRM = [...pools.rare, ...pools.mythic];
+
+  // 0. foil basic
+  cards.push(draw.pick(pools.basics, pools.common, pools.uncommon, regularRM));
+  // 1–4. foil regular commons/uncommons
+  for (let i = 0; i < 4; i++) cards.push(odds(rng, [1, 2]) ? draw.pick(pools.uncommon, pools.common, regularRM) : draw.pick(pools.common, pools.uncommon, regularRM));
+  // 5–6. foil showcase/borderless commons/uncommons; 7–8. the same, non-foil
+  for (let i = 0; i < 4; i++) cards.push(draw.pick(framedCU, altCU, pools.uncommon, pools.common, regularRM));
+  // 9. extended-art rare/mythic
+  cards.push(draw.pick(extendedRM, altRM, regularRM, regularCU));
+  // 10. showcase/borderless rare/mythic
+  cards.push(draw.pick(framedRM, altRM, regularRM, regularCU));
+  // 11. foil extended-art rare/mythic
+  cards.push(draw.pick(extendedRM, altRM, regularRM, regularCU));
+  // 12. foil showcase/borderless rare/mythic
+  cards.push(draw.pick(framedRM, altRM, regularRM, regularCU));
+  // 13. foil-etched rare/mythic
+  cards.push(draw.pick(etchedRM, altRM, regularRM, regularCU));
+  // 14. foil regular rare/mythic
+  cards.push(template.mythicOdds && odds(rng, template.mythicOdds) ? draw.pick(pools.mythic, pools.rare, regularCU) : draw.pick(pools.rare, pools.mythic, regularCU));
+
+  if (cards.length !== GENERIC_COLLECTOR_SIZE) throw new Error(`rollPack(${set}/collector): ${cards.length} cards`);
+  return { cards, foil: [...GENERIC_COLLECTOR_FOIL_SLOTS] };
+}
+
+// ---------------------------------------------------------------------------
 // public API
 // ---------------------------------------------------------------------------
 
@@ -362,6 +431,11 @@ export function dataVersionFor(set: SetCode, data: AnySetData | undefined = getS
     for (const c of data.cards) mix(c.id);
     mix('basics');
     for (const c of data.basics) mix(c.id);
+    if (data.variants?.length || data.setType !== undefined) {
+      mix('variants');
+      for (const c of data.variants ?? []) mix(c.id + (c.v ?? ''));
+      mix(data.setType ?? '');
+    }
     v = 'rt' + h.toString(16).padStart(8, '0');
     versionCache.set(data, v);
   }
@@ -392,7 +466,7 @@ export function rollPackOfKind(set: SetCode, kind: PackKind, seedHex: string, da
       ({ cards, foil } = rollSet(set, rng, pools));
       break;
     case 'collector':
-      ({ cards, foil } = rollCollector(set, rng, pools));
+      ({ cards, foil } = isBundledSet(set) ? rollCollector(set, rng, pools) : rollGenericCollector(set, rng, pools, templateFor(set, data)));
       break;
   }
 

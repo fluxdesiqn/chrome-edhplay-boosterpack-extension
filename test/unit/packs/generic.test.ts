@@ -3,6 +3,8 @@ import { DATA_VERSION } from '@shared/packs/data';
 import { findCard } from '@shared/packs/identity';
 import { _resetRegistry, registerSetData } from '@shared/packs/registry';
 import {
+  GENERIC_COLLECTOR_FOIL_SLOTS,
+  GENERIC_COLLECTOR_SIZE,
   GENERIC_MYTHIC_ODDS,
   PACK_SIZE,
   dataVersionFor,
@@ -14,7 +16,7 @@ import {
   templateFor,
   verifyPack,
 } from '@shared/packs/roller';
-import type { PackCard, RolledPack } from '@shared/packs/types';
+import { _resetSetInfo, availablePacks, kindName, packLabel, type PackCard, type RolledPack } from '@shared/packs/types';
 import { SYNTH_CODE, makeSyntheticSet } from './synthetic';
 
 const seedOf = (i: number): string => i.toString(16).padStart(16, '0');
@@ -28,7 +30,10 @@ const isRM = (c: PackCard): boolean => c.r === 'r' || c.r === 'm';
 const isBasic = (c: PackCard): boolean => c.t.startsWith('Basic Land');
 
 describe('generic draft template (runtime sets)', () => {
-  beforeEach(() => _resetRegistry());
+  beforeEach(() => {
+    _resetRegistry();
+    _resetSetInfo();
+  });
 
   it('derives 1 rare / 3 uncommons / commons / land from the data', () => {
     const data = makeSyntheticSet();
@@ -63,6 +68,7 @@ describe('generic draft template (runtime sets)', () => {
     expect(packSize(SYNTH_CODE, 'draft')).toBe(15);
     registerSetData(makeSyntheticSet({ packSize: 14 }));
     expect(packSize(SYNTH_CODE, 'draft')).toBe(14);
+    expect(packSize(SYNTH_CODE, 'collector')).toBe(GENERIC_COLLECTOR_SIZE);
     registerSetData(makeSyntheticSet({ packSize: 15 }));
     expect(packSize(SYNTH_CODE, 'draft')).toBe(15);
     // anything but 14 is treated as the classic 15
@@ -169,6 +175,10 @@ describe('generic draft template (runtime sets)', () => {
     expect(dataVersionFor(SYNTH_CODE, a)).toMatch(/^rt[0-9a-f]{8}$/);
     expect(dataVersionFor(SYNTH_CODE, makeSyntheticSet({ packSize: 14 }))).not.toBe(dataVersionFor(SYNTH_CODE, a));
     expect(dataVersionFor(SYNTH_CODE, makeSyntheticSet({ counts: { c: 41 } }))).not.toBe(dataVersionFor(SYNTH_CODE, a));
+    // alternate-frame printings and the set type are part of the snapshot too
+    expect(dataVersionFor(SYNTH_CODE, makeSyntheticSet({ variants: true }))).not.toBe(dataVersionFor(SYNTH_CODE, a));
+    expect(dataVersionFor(SYNTH_CODE, makeSyntheticSet({ setType: 'expansion' }))).not.toBe(dataVersionFor(SYNTH_CODE, a));
+    expect(dataVersionFor(SYNTH_CODE, makeSyntheticSet({ setType: 'expansion' }))).not.toBe(dataVersionFor(SYNTH_CODE, makeSyntheticSet({ setType: 'commander' })));
     // unregistered set: falls back to the bundled version string
     expect(dataVersionFor(SYNTH_CODE)).toBe(DATA_VERSION);
   });
@@ -200,5 +210,110 @@ describe('generic draft template (runtime sets)', () => {
     expect(() => rollPackOfKind('qqq', 'draft', '0123456789abcdef')).toThrow(/no set data for qqq/);
     expect(() => poolsFor('qqq')).toThrow(/no set data for qqq/);
     expect(() => templateFor('qqq')).toThrow(/no set data for qqq/);
+    // a set whose meta says no Collector Boosters (pre-2019, or a Commander precon) still refuses
+    _resetRegistry();
+    registerSetData(makeSyntheticSet({ setType: 'expansion', released: '2019-10-03', variants: true }));
+    expect(() => rollPackOfKind(SYNTH_CODE, 'collector', '0123456789abcdef')).toThrow(/zzz has no collector/);
+    _resetRegistry();
+    registerSetData(makeSyntheticSet({ setType: 'commander', released: '2022-02-18', variants: true }));
+    expect(() => rollPackOfKind(SYNTH_CODE, 'collector', '0123456789abcdef')).toThrow(/zzz has no collector/);
+  });
+});
+
+describe('Collector Boosters for runtime sets', () => {
+  beforeEach(() => {
+    _resetRegistry();
+    _resetSetInfo();
+  });
+
+  it('availablePacks: from the Scryfall meta before registration, from the registered data after', () => {
+    expect(availablePacks(SYNTH_CODE)).toEqual(['draft']);
+    expect(availablePacks(SYNTH_CODE, { type: 'expansion', released: '2019-10-04' })).toEqual(['draft', 'collector']);
+    expect(availablePacks(SYNTH_CODE, { type: 'expansion', released: '2019-10-03' })).toEqual(['draft']);
+    for (const type of ['core', 'masters', 'draft_innovation', 'funny']) expect(availablePacks(SYNTH_CODE, { type, released: '2024-06-14' })).toEqual(['draft', 'collector']);
+    expect(availablePacks(SYNTH_CODE, { type: 'commander', released: '2022-02-18' })).toEqual(['draft']);
+    expect(availablePacks('nec', { type: 'commander', released: '2022-02-18' })).toEqual(['draft']);
+    // bundled sets ignore meta
+    expect(availablePacks('chk', { type: 'expansion', released: '2024-01-01' })).toEqual(['draft']);
+    expect(availablePacks('neo')).toEqual(['draft', 'set', 'collector']);
+
+    registerSetData(makeSyntheticSet({ setType: 'expansion', released: '2021-02-05' }));
+    expect(availablePacks(SYNTH_CODE)).toEqual(['draft', 'collector']);
+    // registered info wins over (stale) meta
+    expect(availablePacks(SYNTH_CODE, { type: 'commander', released: '2021-02-05' })).toEqual(['draft', 'collector']);
+    // data without a set type (older cache) is draft only
+    _resetRegistry();
+    registerSetData(makeSyntheticSet({ released: '2021-02-05' }));
+    expect(availablePacks(SYNTH_CODE)).toEqual(['draft']);
+  });
+
+  it('a Commander precon opens a "Pack", a booster set a "Play Booster"', () => {
+    expect(kindName(SYNTH_CODE, 'draft')).toBe('Play Booster');
+    registerSetData(makeSyntheticSet({ setType: 'commander', released: '2022-02-18' }));
+    expect(kindName(SYNTH_CODE, 'draft')).toBe('Pack');
+    expect(packLabel(SYNTH_CODE, 'draft')).toBe('Synthetic Set Pack');
+    _resetRegistry();
+    registerSetData(makeSyntheticSet({ setType: 'expansion', released: '2022-02-18' }));
+    expect(kindName(SYNTH_CODE, 'draft')).toBe('Play Booster');
+    expect(kindName(SYNTH_CODE, 'collector')).toBe('Collector Booster');
+    expect(kindName('neo', 'draft')).toBe('Play Booster');
+  });
+
+  it('rolls 15 distinct cards with 11 foils; alternate frames fill their slots when the set has them', () => {
+    const data = makeSyntheticSet({ setType: 'expansion', released: '2021-02-05', variants: true });
+    registerSetData(data);
+    for (let i = 0; i < 200; i++) {
+      const pack = rollPackOfKind(SYNTH_CODE, 'collector', seedOf(i));
+      expect(pack.kind).toBe('collector');
+      expect(pack.cards).toHaveLength(GENERIC_COLLECTOR_SIZE);
+      expect(pack.foil).toEqual(GENERIC_COLLECTOR_FOIL_SLOTS);
+      expect(pack.dataVersion).toBe(dataVersionFor(SYNTH_CODE, data));
+      const cards = cardsOf(pack);
+      expect(new Set(cards.map((c) => c.id)).size).toBe(15);
+      expect(new Set(cards.map((c) => c.name)).size).toBe(15);
+      expect(isBasic(cards[0]!)).toBe(true);
+      for (const c of cards.slice(1, 5)) expect(c.r === 'c' || c.r === 'u').toBe(true);
+      for (const c of cards.slice(1, 5)) expect(c.v).toBeUndefined();
+      for (const c of cards.slice(5, 9)) expect(c.v).toBe('s');
+      for (const c of cards.slice(5, 9)) expect(c.r === 'c' || c.r === 'u').toBe(true);
+      expect(cards[9]!.v).toBe('e');
+      expect(cards[10]!.v === 's' || cards[10]!.v === 'b').toBe(true);
+      expect(cards[11]!.v).toBe('e');
+      expect(cards[12]!.v === 's' || cards[12]!.v === 'b').toBe(true);
+      expect(cards[13]!.v).toBe('x');
+      expect(cards[14]!.v).toBeUndefined();
+      for (const c of cards.slice(9)) expect(isRM(c)).toBe(true);
+      expect(verifyPack(pack)).toBe(true);
+    }
+  });
+
+  it('falls back to regular printings when a set has no alternate frames, and is deterministic', () => {
+    registerSetData(makeSyntheticSet({ setType: 'expansion', released: '2021-02-05' }));
+    const a = rollPackOfKind(SYNTH_CODE, 'collector', 'feedfacecafebeef');
+    const b = rollPackOfKind(SYNTH_CODE, 'collector', 'feedfacecafebeef');
+    expect(a).toEqual(b);
+    expect(a).not.toEqual(rollPackOfKind(SYNTH_CODE, 'collector', 'feedfacecafebee0'));
+    const cards = cardsOf(a);
+    expect(cards).toHaveLength(15);
+    expect(new Set(cards.map((c) => c.name)).size).toBe(15);
+    expect(cards.every((c) => c.v === undefined)).toBe(true);
+    expect(isBasic(cards[0]!)).toBe(true);
+    for (const c of cards.slice(1, 9)) expect(c.r === 'c' || c.r === 'u').toBe(true);
+    for (const c of cards.slice(9)) expect(isRM(c)).toBe(true);
+    // draft rolls are untouched by the collector template
+    expect(rollPackOfKind(SYNTH_CODE, 'draft', 'feedfacecafebeef')).toEqual(rollPack(SYNTH_CODE, 'feedfacecafebeef'));
+  });
+
+  it('golden seeds (the generic collector draw stream is frozen: peers re-roll with the same data)', () => {
+    registerSetData(makeSyntheticSet({ setType: 'expansion', released: '2021-02-05', variants: true }));
+    const golden: Record<string, string> = {
+      '0000000000000001': 'zzz:74 zzz:49 zzz:54 zzz:14 zzz:51 zzz:113 zzz:110 zzz:114 zzz:127 zzz:98 zzz:88 zzz:101 zzz:76 zzz:105 zzz:67',
+      '0123456789abcdef': 'zzz:75 zzz:48 zzz:45 zzz:38 zzz:43 zzz:122 zzz:126 zzz:113 zzz:111 zzz:101 zzz:88 zzz:77 zzz:85 zzz:105 zzz:63',
+      feedfacecafebeef: 'zzz:75 zzz:57 zzz:28 zzz:17 zzz:52 zzz:128 zzz:120 zzz:110 zzz:122 zzz:80 zzz:100 zzz:77 zzz:85 zzz:96 zzz:66',
+    };
+    for (const [seed, expected] of Object.entries(golden)) {
+      const pack = rollPackOfKind(SYNTH_CODE, 'collector', seed);
+      expect(pack.cards.join(' ')).toBe(expected);
+    }
   });
 });

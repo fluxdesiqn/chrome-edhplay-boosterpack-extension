@@ -9,7 +9,7 @@
  * set); the engine asks for them per pack through `prints.resolveCards`.
  */
 import type { RuntimeSetData, SetSummary } from '@shared/packs/runtime';
-import type { Layout, PackCard, Rarity } from '@shared/packs/types';
+import { BOOSTER_SET_TYPES, type Layout, PRECON_SET_TYPES, type PackCard, type Rarity, type Variant, setInfoFor } from '@shared/packs/types';
 import { cacheGet, cacheSet } from './cache';
 
 export const SCRYFALL_BASE = 'https://api.scryfall.com';
@@ -19,11 +19,12 @@ const GAP_MS = 100;
 
 export const SETS_CACHE_KEY = 'sets:list';
 export const SETS_TTL = 7 * 24 * 3600 * 1000;
-export const setCardsCacheKey = (code: string): string => `sets:cards:${code}`;
+/** Bumped whenever the cached `RuntimeSetData` shape changes (v2: variants + setType). */
+export const setCardsCacheKey = (code: string): string => `sets:cards:v2:${code}`;
 export const SET_CARDS_TTL = 30 * 24 * 3600 * 1000;
 
-/** Sets that were sold as boosters and have enough cards to draft. */
-export const BOOSTER_SET_TYPES: ReadonlySet<string> = new Set(['core', 'expansion', 'masters', 'draft_innovation', 'funny']);
+export { BOOSTER_SET_TYPES };
+/** Sets the picker offers: booster products and preconstructed Commander decks with enough cards to draw a pack from. */
 export const MIN_SET_CARDS = 60;
 /** Play Boosters (14 cards) replaced Draft Boosters from Murders at Karlov Manor on. */
 export const PLAY_BOOSTER_FROM = '2024-02-01';
@@ -113,11 +114,55 @@ export interface ScryCard {
   set?: string;
   set_name?: string;
   released_at?: string;
+  frame_effects?: string[];
+  border_color?: string;
+  finishes?: string[];
+  promo_types?: string[];
+  digital?: boolean;
+  promo?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // card mapping (mirror of scripts/build-set-data.ts)
 // ---------------------------------------------------------------------------
+
+/**
+ * Promo types that match `-is:booster` but were never in Collector Boosters:
+ * Alchemy rebalanced digital cards, bundle / buy-a-box / promo-pack / WPN promos,
+ * theme-booster exclusives and set-extension concept art.
+ */
+const NON_COLLECTOR_PROMO_TYPES = new Set([
+  'rebalanced',
+  'alchemy',
+  'bundle',
+  'buyabox',
+  'promopack',
+  'prerelease',
+  'wizardsplaynetwork',
+  'setextension',
+  'stepandcompleat',
+  'themepack',
+  'serialized',
+]);
+
+export function isCollectorPrinting(card: ScryCard): boolean {
+  if (card.digital || card.promo) return false;
+  if (card.collector_number.startsWith('A-')) return false;
+  for (const t of card.promo_types ?? []) if (NON_COLLECTOR_PROMO_TYPES.has(t)) return false;
+  return true;
+}
+
+/** Alternate-frame kind with precedence x > b > s > e (a neon-ink borderless is still 'x'); null for a regular frame. */
+export function variantOf(card: ScryCard): Variant | null {
+  const fx = card.frame_effects ?? [];
+  const finishes = card.finishes ?? [];
+  const promos = card.promo_types ?? [];
+  if (finishes.includes('etched') || promos.includes('neonink')) return 'x';
+  if (card.border_color === 'borderless') return 'b';
+  if (fx.includes('showcase')) return 's';
+  if (fx.includes('extendedart')) return 'e';
+  return null;
+}
 
 const RARITY: Record<string, Rarity> = { common: 'c', uncommon: 'u', rare: 'r', mythic: 'm' };
 
@@ -186,18 +231,19 @@ export function toSetSummary(s: ScrySet): SetSummary {
   return out;
 }
 
-export function isBoosterSet(s: ScrySet): boolean {
-  return BOOSTER_SET_TYPES.has(s.set_type) && s.digital !== true && s.card_count >= MIN_SET_CARDS;
+/** Paper booster sets and Commander precon sets with ≥60 cards. */
+export function isPickableSet(s: ScrySet): boolean {
+  return (BOOSTER_SET_TYPES.has(s.set_type) || PRECON_SET_TYPES.has(s.set_type)) && s.digital !== true && s.card_count >= MIN_SET_CARDS;
 }
 
-/** Booster-capable paper sets with ≥60 cards, newest first (Scryfall order). Cached 7 days. */
+/** Pickable paper sets with ≥60 cards, newest first (Scryfall order). Cached 7 days. */
 export async function fetchSetList(): Promise<SetSummary[]> {
   const cached = await cacheGet<SetSummary[]>(SETS_CACHE_KEY);
   if (cached) return cached;
   const url = `${SCRYFALL_BASE}/sets`;
   const list = await scryfallGet<ScryList<ScrySet>>(url);
   if (!list) throw new ScryfallError(404, url);
-  const sets = (list.data ?? []).filter(isBoosterSet).map(toSetSummary);
+  const sets = (list.data ?? []).filter(isPickableSet).map(toSetSummary);
   await cacheSet(SETS_CACHE_KEY, sets, SETS_TTL);
   return sets;
 }
@@ -237,17 +283,36 @@ function cnCompareRaw(a: string | undefined, b: string | undefined): number {
   return String(a ?? '').localeCompare(String(b ?? ''));
 }
 
-async function setMeta(code: string): Promise<{ name: string; released: string } | null> {
+async function setMeta(code: string): Promise<{ name: string; released: string; type: string } | null> {
   const cached = await cacheGet<SetSummary[]>(SETS_CACHE_KEY);
   const hit = cached?.find((s) => s.code === code);
-  if (hit) return { name: hit.name, released: hit.released };
+  if (hit) return { name: hit.name, released: hit.released, type: hit.type };
   const set = await scryfallGet<ScrySet>(`${SCRYFALL_BASE}/sets/${encodeURIComponent(code)}`);
-  return set ? { name: set.name, released: set.released_at ?? '' } : null;
+  return set ? { name: set.name, released: set.released_at ?? '', type: set.set_type } : null;
+}
+
+/** Map alternate-frame printings to `PackCard`s with `v` set (and `co` when they were never in draft boosters), deduplicated by id. */
+function toVariants(raw: ScryCard[], collectorOnly: boolean): PackCard[] {
+  const out: PackCard[] = [];
+  const seen = new Set<string>();
+  for (const c of raw) {
+    const v = variantOf(c);
+    if (!v || seen.has(c.id) || !isCollectorPrinting(c)) continue;
+    const card = toPackCard(c);
+    if (!card) continue;
+    seen.add(c.id);
+    card.v = v;
+    if (collectorOnly) card.co = true;
+    out.push(card);
+  }
+  return out;
 }
 
 /**
- * Booster-eligible cards of `code` (non-basics + basics), as `RuntimeSetData`.
- * Throws for unknown sets or sets without booster cards. Cached 30 days.
+ * Cards of `code` as `RuntimeSetData`: the booster-eligible regular printings
+ * (`cards` + `basics`) and, for sets sold with Collector Boosters, the
+ * alternate-frame printings (`variants`). Throws for unknown sets or sets
+ * without cards. Cached 30 days.
  */
 export async function fetchSetCards(code: string): Promise<RuntimeSetData> {
   code = code.toLowerCase();
@@ -257,26 +322,35 @@ export async function fetchSetCards(code: string): Promise<RuntimeSetData> {
 
   const meta = await setMeta(code);
   if (!meta) throw new Error(`unknown set "${code}"`);
+  const info = setInfoFor(meta.type, meta.released);
 
   let rawCards = await searchAll(`set:${code}+is:booster+-t:basic`);
   let rawBasics: ScryCard[];
-  let boosterFlagged = true;
+  let variants: PackCard[];
   if (rawCards.length > 0) {
     rawBasics = await searchAll(`set:${code}+is:booster+t:basic`);
+    // Showcase commons/uncommons of the 2019–2021 sets were in draft boosters too and come back
+    // from is:booster; they are alternate frames all the same and move to `variants`.
+    const inBooster = toVariants(rawCards, false);
+    rawCards = rawCards.filter((c) => variantOf(c) === null);
+    const collectorOnly = info.collector ? toVariants(await searchAll(`set:${code}+-is:booster+-t:basic+-is:promo+-is:digital`), true) : [];
+    const seen = new Set(inBooster.map((c) => c.id));
+    variants = [...inBooster, ...collectorOnly.filter((c) => !seen.has(c.id))];
   } else {
     // Scryfall has not marked booster contents for this set yet (true for every set released
-    // after Lorwyn Eclipsed at the time of writing). Fall back to the set's regular printings:
-    // no promos, no digital, and one printing per name (the lowest collector number), which
-    // drops showcase / extended-art / borderless variants that only appear in collector boosters.
-    boosterFlagged = false;
+    // after Lorwyn Eclipsed at the time of writing), or the set was never sold as boosters
+    // (Commander decks). Fall back to the set's regular printings: no promos, no digital,
+    // alternate frames split off into `variants`, and one printing per name (the lowest
+    // collector number) for the rest.
     const all = await searchAll(`set:${code}+-t:basic+-is:promo+-is:digital`);
-    rawCards = firstPrintingPerName(all);
+    variants = info.collector ? toVariants(all, false) : [];
+    rawCards = firstPrintingPerName(all.filter((c) => variantOf(c) === null));
     rawBasics = await searchAll(`set:${code}+t:basic+-is:promo+-is:digital`);
   }
   const cards = rawCards.map(toPackCard).filter((c): c is PackCard => c !== null).sort(cnCompare);
   if (cards.length === 0) throw new Error(`set "${code}" has no cards on Scryfall yet`);
   const basics = rawBasics.map(toPackCard).filter((c): c is PackCard => c !== null).sort(cnCompare);
-  void boosterFlagged;
+  variants.sort(cnCompare);
 
   const data: RuntimeSetData = {
     code,
@@ -284,6 +358,8 @@ export async function fetchSetCards(code: string): Promise<RuntimeSetData> {
     released: meta.released,
     cards,
     basics,
+    variants,
+    setType: meta.type,
     hasMythics: cards.some((c) => c.r === 'm'),
     packSize: packSizeFor(meta.released),
     fetchedAt: Date.now(),

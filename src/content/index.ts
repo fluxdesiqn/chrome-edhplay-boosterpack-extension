@@ -10,7 +10,7 @@ import { defaultConfig } from '@shared/state';
 import { Panel } from '@ui/Panel';
 import { applyMainMessage, bridgeReady, config as configSig, readOnly, setList, setListError, setListLoader } from '@ui/machine';
 import type { RuntimeSetData, SetSummary } from '@shared/packs/runtime';
-import { PLAY_BOOSTER_FROM, registerSetInfo, registerSetName } from '@shared/packs/types';
+import { registerSetInfo, registerSetName, setInfoFor } from '@shared/packs/types';
 import { loadConfig, loadRoomState, saveConfig, saveRoomState } from './storage';
 import { RoomLock, rpc } from './lock';
 import cssText from '@ui/styles.css?inline';
@@ -83,7 +83,7 @@ setListLoader.load = () => {
       const sets = res?.sets ?? [];
       for (const s of sets) {
         registerSetName(s.code, s.name);
-        registerSetInfo(s.code, { playBooster: s.released >= PLAY_BOOSTER_FROM });
+        registerSetInfo(s.code, setInfoFor(s.type, s.released));
       }
       setList.value = sets;
     })
