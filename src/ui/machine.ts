@@ -67,7 +67,7 @@ export const screen = computed<Screen>(() => {
   const s = socket.value;
   if (needsReload.value) return 'disabled';
   if (!s || s.ev === 'closed') return 'waiting';
-  if (s.ev === 'unsupported' || s.ctx.spectator || readOnly.value) return 'disabled';
+  if (s.ev === 'unsupported' || s.ev === 'drift' || s.ctx.spectator || readOnly.value) return 'disabled';
   if (!s.ctx.confirmed) return 'waiting';
   const st = state.value;
   if (st?.activation && st.activation.phase !== 'done') return 'activate';

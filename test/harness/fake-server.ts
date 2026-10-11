@@ -59,6 +59,9 @@ export class FakeServer {
    */
   readonly options = { rejectReorder: false, handSize: 7, mulliganGate: true, noShuffle: false };
 
+  /** Simulates an edhplay deploy that changes frame shapes: applied to every frame before it is sent. */
+  mutateFrame: ((frame: Frame) => Frame) | null = null;
+
   turnSeq = 1;
   mulliganPhaseActive = false;
   currentTurnPlayerId: string | null = null;
@@ -468,7 +471,8 @@ export class FakeServer {
   private emit(playerId: string, frame: Frame): void {
     const ws = this.sockets.get(playerId);
     if (!ws || ws.readyState !== FakeWs.OPEN) return;
-    const snapshot = JSON.parse(JSON.stringify(frame)) as Frame; // freeze the payload at send time
+    let snapshot = JSON.parse(JSON.stringify(frame)) as Frame; // freeze the payload at send time
+    if (this.mutateFrame) snapshot = this.mutateFrame(snapshot);
     let box = this.outbox.get(playerId);
     if (!box) this.outbox.set(playerId, (box = []));
     box.push(snapshot);

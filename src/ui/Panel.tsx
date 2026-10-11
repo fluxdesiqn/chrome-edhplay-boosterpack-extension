@@ -93,12 +93,14 @@ function GameTab({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: P
     return (
       <div class="hok-note warn">
         {sk?.ev === 'unsupported'
-          ? `This game uses protocol version ${sk.ctx.pv}; the extension supports version 4. Nothing will be sent or rewritten.`
-          : sk?.ctx.spectator
-            ? 'Spectating: mapped cards are shown, nothing is sent.'
-            : readOnly.value
-              ? 'Another tab is driving this room. This tab only displays.'
-              : 'Disabled.'}
+          ? `edhplay changed something the extension depends on (${sk.ctx.problems.join('; ')}). Nothing will be sent or rewritten until the extension is updated.`
+          : sk?.ev === 'drift'
+            ? `edhplay changed a game message the extension reads (${sk.ctx.problems.join('; ')}). Card actions are paused; mapped cards still display. Reload to retry.`
+            : sk?.ctx.spectator
+              ? 'Spectating: mapped cards are shown, nothing is sent.'
+              : readOnly.value
+                ? 'Another tab is driving this room. This tab only displays.'
+                : 'Disabled.'}
       </div>
     );
   }
@@ -525,7 +527,7 @@ function DiagTab({ send, onExportRecord }: { send: (m: IsoToMain) => void; onExp
     <div>
       <p class="hok-h">Connection</p>
       <div class="hok-mono">
-        {sk ? `${sk.ev} · room ${sk.ctx.roomId.slice(0, 8)} · pv ${sk.ctx.pv} · ${sk.ctx.binaryOut ? 'binary' : 'text'}${sk.ctx.spectator ? ' · spectator' : ''}` : 'no socket'}
+        {sk ? `${sk.ev} · room ${sk.ctx.roomId.slice(0, 8)} · pv ${sk.ctx.protocolVersion ?? sk.ctx.pv} · ${sk.ctx.binaryOut ? 'binary' : 'text'}${sk.ctx.spectator ? ' · spectator' : ''}` : 'no socket'}
       </div>
       <div style={{ height: 8 }} />
       <p class="hok-h">Actions sent ({ledger.value.length})</p>
