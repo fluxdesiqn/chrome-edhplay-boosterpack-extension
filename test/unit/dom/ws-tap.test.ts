@@ -254,19 +254,29 @@ describe('installWsTap', () => {
       expect(h.events.map((e) => e.ev)).toEqual(['opened']);
     });
 
-    it('game_state with pv 5 → unsupported; later frames untouched; sendRaw rejects', async () => {
+    it('game_state with pv 5 but the same shape → confirmed, protocolVersion recorded', () => {
+      const h = setup({ onFrame: frameFn({ kind: 'pass' }) });
+      new h.win.WebSocket(GAME_URL);
+      native().open();
+      native().emit(gameState(5));
+      expect(h.events.map((e) => e.ev)).toEqual(['opened', 'confirmed']);
+      expect(h.tap.active()).toMatchObject({ confirmed: true, protocolVersion: 5, problems: [] });
+    });
+
+    it('game_state without players → unsupported; later frames untouched; sendRaw rejects', async () => {
       const onFrame = frameFn({ kind: 'drop' });
       const h = setup({ onFrame });
       const ws = new h.win.WebSocket(GAME_URL);
       native().open();
       const seen: unknown[] = [];
       ws.onmessage = (e) => seen.push(e.data);
-      native().emit(gameState(5));
+      const bad = JSON.stringify({ type: 'game_state', protocol_version: 5, seats: [] });
+      native().emit(bad);
       expect(h.events.map((e) => e.ev)).toEqual(['opened', 'unsupported']);
-      expect(h.events[1]!.detail).toBe(5);
+      expect(h.events[1]!.detail).toEqual(['game_state.players is missing']);
       const later = JSON.stringify({ type: 'move_card', id: 'x' });
       native().emit(later);
-      expect(seen).toEqual([gameState(5), later]);
+      expect(seen).toEqual([bad, later]);
       expect(onFrame).not.toHaveBeenCalled();
       expect(h.tap.active()).toBeNull();
       await expect(h.tap.sendRaw({ type: 'pong' })).rejects.toThrow(/unsupported/);

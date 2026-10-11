@@ -10,6 +10,8 @@ export interface RawSender {
 }
 
 const GAP_DEFAULT = 150;
+/** Still allowed while card actions are paused: they cannot move the wrong card. */
+const ALWAYS_ALLOWED = new Set(['send_chat_message', 'pong']);
 const GAP_BY_TYPE: Record<string, number> = {
   exile_x_cards: 850,
   draw_x_cards: 850,
@@ -24,6 +26,8 @@ export class ActionSender {
   private chain: Promise<void> = Promise.resolve();
   private readonly entries: LedgerEntry[] = [];
   onLedger: ((entries: LedgerEntry[]) => void) | null = null;
+  /** When set, card actions are refused (edhplay changed a frame the engine reads). */
+  pausedReason: string | null = null;
 
   constructor(
     private readonly tap: RawSender,
@@ -33,6 +37,7 @@ export class ActionSender {
 
   send(action: OutboundAction, summary?: string): Promise<void> {
     const type = action.type;
+    if (this.pausedReason && !ALWAYS_ALLOWED.has(type)) return Promise.reject(new Error(`paused: ${this.pausedReason}`));
     const gap = GAP_BY_TYPE[type] ?? GAP_DEFAULT;
     const run = async () => {
       const wait = this.lastAt + gap - this.now();

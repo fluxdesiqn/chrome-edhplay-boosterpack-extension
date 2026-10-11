@@ -29,7 +29,7 @@ import type { RuntimeSetData } from '@shared/packs/runtime';
 import { newSeed } from '@shared/packs/rng';
 import { rollPackOfKind, shuffleIntoPile } from '@shared/packs/roller';
 import type { CardRef, PackKind, SetCode } from '@shared/packs/types';
-import { PROTOCOL_VERSION, stockNonBattlefieldUpdates, type CardIdentity, type Zone } from '@shared/protocol';
+import { PROTOCOL_VERSION, TESTED_PROTOCOL_VERSIONS, frameProblems, stockNonBattlefieldUpdates, type CardIdentity, type Zone } from '@shared/protocol';
 import { defaultConfig, emptyGameState, emptyPhase, type CardSummary, type Config, type GameMode, type GamePhase, type HokGameState, type PeerView, type RolledPackRecord } from '@shared/state';
 import { chunkMapPairs, decodeSync, encodeSync, HELLO_TRAILER, isSyncLine } from '@shared/sync/codec';
 import { applySync, mappingIndex } from '@shared/sync/peers';
@@ -121,8 +121,12 @@ export class Engine {
     this.ctx = ctx;
     if (ev === 'opened') {
       this.helloSent = false;
+      this.actions.pausedReason = null;
     }
-    if (ev === 'unsupported') this.diag('error', `unsupported protocol version ${ctx.pv} (need ${PROTOCOL_VERSION})`);
+    if (ev === 'unsupported') this.diag('error', `edhplay changed its game protocol (version ${String(ctx.protocolVersion)}): ${ctx.problems.join('; ')}`);
+    if (ev === 'confirmed' && ctx.protocolVersion !== null && !TESTED_PROTOCOL_VERSIONS.includes(ctx.protocolVersion)) {
+      this.diag('warn', `protocol version ${ctx.protocolVersion} is untested (built against ${PROTOCOL_VERSION}); its frames look compatible, continuing`);
+    }
     if (ev === 'closed') {
       this.echo.cancelAll('socket closed');
       this.sweepAbort?.abort();
@@ -143,6 +147,8 @@ export class Engine {
     }
 
     if (!synthetic) {
+      const problems = frameProblems(msg);
+      if (problems.length > 0) this.onDrift(ctx, problems);
       if (type === 'game_state') this.onGameState(ctx, msg);
       if (this.shouldSuppress(type, msg)) return { kind: 'drop' };
 
@@ -168,6 +174,21 @@ export class Engine {
     const r = this.rewrite.rewrite(cleaned);
     if (r.changed || synthetic) return { kind: 'replace', msg: r.msg };
     return { kind: 'pass' };
+  }
+
+  /**
+   * A frame the engine reads no longer has the expected shape: edhplay changed
+   * something we rely on. Stop sending card actions (the zone index may now be
+   * wrong) but keep displaying mapped cards and syncing chat.
+   */
+  private onDrift(ctx: SocketCtx, problems: string[]): void {
+    if (this.actions.pausedReason) return;
+    this.actions.pausedReason = problems.join('; ');
+    ctx.problems = problems;
+    this.sweepAbort?.abort();
+    this.mulliganAbort?.abort();
+    this.diag('error', `edhplay changed a game message the extension reads; card actions paused: ${this.actions.pausedReason}`);
+    this.bridge.send({ type: 'socket', ev: 'drift', ctx: { ...ctx } });
   }
 
   private shouldSuppress(type: unknown, msg: Record<string, unknown>): boolean {

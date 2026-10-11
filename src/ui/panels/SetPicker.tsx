@@ -1,7 +1,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { SetSummary } from '@shared/packs/runtime';
-import { KIND_SHORT_NAMES, SELECTABLE_KINDS, SET_CODES, SET_NAMES, availablePacks, isBundledSet, kindName, setName, type PackKind } from '@shared/packs/types';
+import { KAMIGAWA_PRODUCTS, KIND_SHORT_NAMES, NEC_CODE, SELECTABLE_KINDS, availablePacks, isKamigawaProduct, kindName, setName, type PackKind } from '@shared/packs/types';
 
 export interface SetPickerProps {
   /** null = still loading */
@@ -14,8 +14,6 @@ export interface SetPickerProps {
   onChange: (set: string, kind: PackKind) => void;
   /** reload the set list */
   onRefresh?: () => void;
-  /** show the bundled Kamigawa sets row (Heroes mode); default true */
-  showKamigawa?: boolean;
   error?: string;
 }
 
@@ -39,28 +37,27 @@ function yearOf(released: string): string {
   return released.slice(0, 4);
 }
 
-/** Bundled sets, recent chips and a searchable list of every Scryfall set, plus the booster-kind pills. */
+/** Kamigawa products, recent chips and a searchable list of every Scryfall set, plus the booster-kind pills. */
 export function SetPicker(props: SetPickerProps): JSX.Element {
   const { sets, recent, value, kind, onChange, onRefresh, error } = props;
-  const showKamigawa = props.showKamigawa !== false;
-  const releasedOf = (code: string): string | undefined => sets?.find((s) => s.code === code)?.released;
+  const summaryOf = (code: string): SetSummary | undefined => sets?.find((s) => s.code === code);
+  const releasedOf = (code: string): string | undefined => summaryOf(code)?.released;
+  /** Kinds sold for a set: from its Scryfall summary until the set is registered. */
+  const kindsOf = (code: string): readonly PackKind[] => availablePacks(code, summaryOf(code));
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
 
   const results = useMemo(() => (sets ? matchSets(sets, query) : []), [sets, query]);
   useEffect(() => setHighlight(0), [query, sets]);
 
-  const kinds = availablePacks(value);
+  const kinds = kindsOf(value);
   const effectiveKind: PackKind = kinds.includes(kind) ? kind : 'draft';
 
-  const nameOf = (code: string): string => {
-    if (isBundledSet(code)) return SET_NAMES[code];
-    return sets?.find((s) => s.code === code)?.name ?? setName(code);
-  };
+  const nameOf = (code: string): string => KAMIGAWA_PRODUCTS.find((p) => p.code === code)?.name ?? summaryOf(code)?.name ?? setName(code);
 
   /** Selecting a set keeps the kind when it is sold for that set, otherwise falls back to draft. */
   const select = (set: string) => {
-    const next: PackKind = availablePacks(set).includes(kind) ? kind : 'draft';
+    const next: PackKind = kindsOf(set).includes(kind) ? kind : 'draft';
     onChange(set, next);
   };
 
@@ -95,22 +92,26 @@ export function SetPicker(props: SetPickerProps): JSX.Element {
   };
 
   const showRecent = recent.length > 0;
-  const runtimeSelected = !isBundledSet(value);
+  const runtimeSelected = !isKamigawaProduct(value);
 
   return (
     <div class="hok-sp">
-      {showKamigawa && (
-        <div class="hok-sp-block">
-          <p class="hok-h">Kamigawa</p>
-          <div class="hok-sets">
-            {SET_CODES.map((code) => (
-              <button type="button" class={`hok-btn secondary ${value === code ? 'selected' : ''}`} aria-pressed={value === code} onClick={() => select(code)}>
-                {SET_NAMES[code]}
-              </button>
-            ))}
-          </div>
+      <div class="hok-sp-block">
+        <p class="hok-h">Kamigawa</p>
+        <div class="hok-sets">
+          {KAMIGAWA_PRODUCTS.map(({ code, name }) => (
+            <button
+              type="button"
+              class={`hok-btn secondary ${value === code ? 'selected' : ''} ${code === NEC_CODE ? 'wide' : ''}`}
+              aria-pressed={value === code}
+              title={code === NEC_CODE ? 'The two Neon Dynasty Commander decks; a pack is 15 random cards of the set' : ''}
+              onClick={() => select(code)}
+            >
+              {name}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {showRecent && (
         <div class="hok-sp-block">

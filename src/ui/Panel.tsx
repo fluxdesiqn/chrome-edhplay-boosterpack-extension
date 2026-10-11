@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { IsoToMain } from '@shared/bridge-contract';
-import { SELECTABLE_KINDS, SET_CODES, availablePacks, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
+import { KAMIGAWA_PRODUCTS, SELECTABLE_KINDS, availablePacks, isKamigawaProduct, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
 import { config, diags, ledger, mulliganChoose, needsReload, offer, peers, phase, pileView, readOnly, requestSetList, screen, seq, setList, setListError, setListLoader, socket, state, zones } from './machine';
 import { SetPicker } from './panels/SetPicker';
 import { PileView } from './panels/PileView';
@@ -93,12 +93,14 @@ function GameTab({ send, onConfig }: { send: (m: IsoToMain) => void; onConfig: P
     return (
       <div class="hok-note warn">
         {sk?.ev === 'unsupported'
-          ? `This game uses protocol version ${sk.ctx.pv}; the extension supports version 4. Nothing will be sent or rewritten.`
-          : sk?.ctx.spectator
-            ? 'Spectating: mapped cards are shown, nothing is sent.'
-            : readOnly.value
-              ? 'Another tab is driving this room. This tab only displays.'
-              : 'Disabled.'}
+          ? `edhplay changed something the extension depends on (${sk.ctx.problems.join('; ')}). Nothing will be sent or rewritten until the extension is updated.`
+          : sk?.ev === 'drift'
+            ? `edhplay changed a game message the extension reads (${sk.ctx.problems.join('; ')}). Card actions are paused; mapped cards still display. Reload to retry.`
+            : sk?.ctx.spectator
+              ? 'Spectating: mapped cards are shown, nothing is sent.'
+              : readOnly.value
+                ? 'Another tab is driving this room. This tab only displays.'
+                : 'Disabled.'}
       </div>
     );
   }
@@ -427,15 +429,22 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
   const [kind, setKind] = useState<PackKind>('draft');
   useEffect(() => requestSetList(), []);
   const loading = seq.value?.seq === 'activate' && /Loading/.test(seq.value.step) && !seq.value.error && !seq.value.done;
-  /** Heroes: one of the Kamigawa products (Play boosters of all four sets + the Neon Dynasty Collector Booster). Otherwise any set. */
-  const randomPack = (): { set: SetCode; kind: PackKind } => {
-    if (heroes) {
-      const products: Array<{ set: SetCode; kind: PackKind }> = [];
-      for (const code of SET_CODES) for (const k of availablePacks(code)) if (SELECTABLE_KINDS.includes(k)) products.push({ set: code, kind: k });
-      return products[Math.floor(Math.random() * products.length)]!;
-    }
-    const pool = (setList.value && setList.value.length ? setList.value.map((s2) => s2.code) : [...SET_CODES]) as SetCode[];
+  /** One of the Kamigawa products: Play boosters of the four sets, the Neon Dynasty Collector Booster, a Neon Dynasty Commander pack. */
+  const randomKamigawa = (): { set: SetCode; kind: PackKind } => {
+    const products: Array<{ set: SetCode; kind: PackKind }> = [];
+    for (const { code } of KAMIGAWA_PRODUCTS) for (const k of availablePacks(code)) if (SELECTABLE_KINDS.includes(k)) products.push({ set: code, kind: k });
+    return products[Math.floor(Math.random() * products.length)]!;
+  };
+  /** A Play Booster of any set in the list (a Kamigawa product until the list has loaded). */
+  const randomSet = (): { set: SetCode; kind: PackKind } => {
+    const pool = setList.value?.map((s2) => s2.code) ?? [];
+    if (pool.length === 0) return randomKamigawa();
     return { set: pool[Math.floor(Math.random() * pool.length)]!, kind: 'draft' };
+  };
+  const open = (r: { set: SetCode; kind: PackKind }) => {
+    setSet(r.set);
+    setKind(r.kind);
+    send({ type: 'cmd', cmd: 'activate', set: r.set, kind: r.kind });
   };
   return (
     <div class="hok-section">
@@ -445,12 +454,11 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
         recent={config.value.recentSets}
         value={set}
         kind={kind}
-        showKamigawa={heroes}
         onChange={(s2, k) => { setSet(s2); setKind(k); }}
         onRefresh={() => { setList.value = null; setListLoader.load?.(); }}
         error={setListError.value}
       />
-      {heroes && !SET_CODES.includes(set as never) && (
+      {heroes && !isKamigawaProduct(set) && (
         <div class="hok-note warn">Heroes of Kamigawa says "Kamigawa booster pack". Opening {setName(set)} is a house rule; make sure your pod agrees.</div>
       )}
       {seq.value?.seq === 'activate' && seq.value.error && <div class="hok-note err">{seq.value.error}</div>}
@@ -459,9 +467,14 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
         {loading ? 'Loading card list…' : `Open ${packLabel(set, kind)}`}
       </button>
       <div style={{ height: 6 }} />
-      <button class="hok-btn secondary block sm" disabled={loading} onClick={() => { const r = randomPack(); setSet(r.set); setKind(r.kind); send({ type: 'cmd', cmd: 'activate', set: r.set, kind: r.kind }); }} title={heroes ? 'Any Kamigawa booster, Collector included' : 'A Play Booster from any set'}>
-        🎲 Random pack
-      </button>
+      <div class="hok-row hok-random">
+        <button class="hok-btn secondary block sm" disabled={loading} onClick={() => open(randomKamigawa())} title="Any Kamigawa product: the four sets, the Neon Dynasty Collector Booster or a Neon Dynasty Commander pack">
+          🎲 Random Kamigawa pack
+        </button>
+        <button class="hok-btn secondary block sm" disabled={loading || !setList.value?.length} onClick={() => open(randomSet())} title={heroes ? 'A Play Booster from any set (a house rule for Heroes of Kamigawa)' : 'A Play Booster from any set'}>
+          🎲 Random set
+        </button>
+      </div>
       {heroes && (
         <div>
           <div style={{ height: 6 }} />
@@ -514,7 +527,7 @@ function DiagTab({ send, onExportRecord }: { send: (m: IsoToMain) => void; onExp
     <div>
       <p class="hok-h">Connection</p>
       <div class="hok-mono">
-        {sk ? `${sk.ev} · room ${sk.ctx.roomId.slice(0, 8)} · pv ${sk.ctx.pv} · ${sk.ctx.binaryOut ? 'binary' : 'text'}${sk.ctx.spectator ? ' · spectator' : ''}` : 'no socket'}
+        {sk ? `${sk.ev} · room ${sk.ctx.roomId.slice(0, 8)} · pv ${sk.ctx.protocolVersion ?? sk.ctx.pv} · ${sk.ctx.binaryOut ? 'binary' : 'text'}${sk.ctx.spectator ? ' · spectator' : ''}` : 'no socket'}
       </div>
       <div style={{ height: 8 }} />
       <p class="hok-h">Actions sent ({ledger.value.length})</p>

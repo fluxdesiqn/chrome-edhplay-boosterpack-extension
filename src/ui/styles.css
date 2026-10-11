@@ -46,6 +46,9 @@
 .hok-card .hok-cap { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.7); font-size: 11px; padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hok-card .hok-tag { position: absolute; top: 4px; left: 4px; font-size: 10px; padding: 1px 5px; border-radius: 999px; background: rgba(0,0,0,.7); }
 .hok-sets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.hok-sets .wide { grid-column: 1 / -1; }
+.hok-random { display: flex; gap: 6px; }
+.hok-random .hok-btn { flex: 1 1 0; min-width: 0; }
 .hok-progress { height: 6px; background: #3d2e57; border-radius: 3px; overflow: hidden; margin: 6px 0; }
 .hok-progress > div { height: 100%; background: #7dffb0; transition: width .2s; }
 .hok-list { margin: 0; padding: 0; list-style: none; }

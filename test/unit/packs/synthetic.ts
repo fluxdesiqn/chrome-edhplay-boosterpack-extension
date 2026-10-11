@@ -16,6 +16,10 @@ export interface SynthOptions {
   packSize?: number;
   hasMythics?: boolean;
   released?: string;
+  /** Scryfall set type; with `released` it decides whether Collector Boosters are offered */
+  setType?: string;
+  /** add alternate-frame printings: showcase, extended and etched of every rare, borderless of every mythic, showcase of the first 20 commons/uncommons */
+  variants?: boolean;
 }
 
 export function makeSyntheticSet(opts: SynthOptions = {}): RuntimeSetData {
@@ -49,7 +53,18 @@ export function makeSyntheticSet(opts: SynthOptions = {}): RuntimeSetData {
     basics.push({ id: synthId(code, n), name: basicNames[i % 5] as string, cn: String(n), r: 'c', t: `Basic Land — ${basicNames[i % 5]}`, l: 'n' });
     n++;
   }
-  return {
+  const variants: PackCard[] = [];
+  if (opts.variants) {
+    const alt = (c: PackCard, v: NonNullable<PackCard['v']>): PackCard => {
+      const card: PackCard = { ...c, id: synthId(code, n), cn: String(n), v, co: true };
+      n++;
+      return card;
+    };
+    for (const c of cards.filter((c) => c.r === 'r')) variants.push(alt(c, 's'), alt(c, 'e'), alt(c, 'x'));
+    for (const c of cards.filter((c) => c.r === 'm')) variants.push(alt(c, 'b'));
+    for (const c of cards.filter((c) => c.r === 'c' || c.r === 'u').slice(0, 20)) variants.push(alt(c, 's'));
+  }
+  const data: RuntimeSetData = {
     code,
     name: opts.name ?? SYNTH_NAME,
     released: opts.released ?? '2005-01-01',
@@ -59,4 +74,7 @@ export function makeSyntheticSet(opts: SynthOptions = {}): RuntimeSetData {
     packSize: opts.packSize ?? 15,
     fetchedAt: 1_700_000_000_000,
   };
+  if (opts.variants) data.variants = variants;
+  if (opts.setType !== undefined) data.setType = opts.setType;
+  return data;
 }

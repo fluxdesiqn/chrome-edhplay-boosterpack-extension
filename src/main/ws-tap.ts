@@ -11,7 +11,7 @@
  * after the pipeline has decided what (if anything) to deliver.
  */
 import type { SocketCtx } from '@shared/bridge-contract';
-import { GAME_WS_HOST, GAME_WS_PATH, PROTOCOL_VERSION } from '@shared/protocol';
+import { GAME_WS_HOST, GAME_WS_PATH, gameStateProblems } from '@shared/protocol';
 import { decodeFrame, encodeFrameLike, frameKind, safeParse } from './frame-codec';
 
 export type FrameDecision = { kind: 'pass' } | { kind: 'drop' } | { kind: 'replace'; msg: Record<string, unknown> };
@@ -152,7 +152,7 @@ export function installWsTap(win: WinLike = window): WsTap {
         }
       }
       const parsed = parseGameSocketUrl(String(url));
-      this.#ctx = parsed ? { ...parsed, confirmed: false, binaryOut: false, unsupported: false } : null;
+      this.#ctx = parsed ? { ...parsed, confirmed: false, binaryOut: false, protocolVersion: null, problems: [], unsupported: false } : null;
 
       super.addEventListener('message', (ev: Event) => this.#dispatch(ev as MessageEvent));
 
@@ -297,10 +297,14 @@ export function installWsTap(win: WinLike = window): WsTap {
 
       if (!ctx.confirmed) {
         if (msg.type !== 'game_state') return { kind: 'pass' };
-        if (msg.protocol_version !== PROTOCOL_VERSION) {
+        // Gate on shape, not on the version number: a bump that leaves what we read intact keeps working.
+        ctx.protocolVersion = typeof msg.protocol_version === 'number' ? msg.protocol_version : null;
+        const problems = gameStateProblems(msg);
+        if (problems.length > 0) {
           ctx.unsupported = true;
-          emit('unsupported', ctx, msg.protocol_version);
-          rejectPending(`unsupported protocol version ${String(msg.protocol_version)}`);
+          ctx.problems = problems;
+          emit('unsupported', ctx, problems);
+          rejectPending(`unsupported game protocol: ${problems.join('; ')}`);
           return { kind: 'pass' };
         }
         ctx.confirmed = true;

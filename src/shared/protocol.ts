@@ -6,7 +6,14 @@
  * "interface-equivalent" rule from the plan stays auditable.
  */
 
+/** The protocol version this build was verified against in a live room. */
 export const PROTOCOL_VERSION = 4;
+/**
+ * Versions known to work. Any other version is still accepted when its frames
+ * have the shape the extension depends on (see `gameStateProblems` and
+ * `frameProblems`), so a version bump that changes nothing we use is harmless.
+ */
+export const TESTED_PROTOCOL_VERSIONS: readonly number[] = [PROTOCOL_VERSION];
 export const GAME_WS_HOST = 'api.edhplay.com';
 export const GAME_WS_PATH = '/ws/game';
 
@@ -255,4 +262,85 @@ export const IDENTITY_IF_PRESENT_FIELDS = ['mana_cost', 'cmc', 'color_identity',
 
 export function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+// ---------------------------------------------------------------------------
+// Shape checks. The extension gates on what the frames contain rather than on
+// the protocol version number, so it only stops when edhplay changes something
+// it actually relies on. Each function returns human-readable problems; [] = OK.
+// ---------------------------------------------------------------------------
+
+const CARD_LIST_KEYS = [...ALL_ZONES, 'revealed_hand_cards', 'revealed_library_cards'] as const;
+
+function cardListProblems(where: string, list: unknown, out: string[]): Record<string, unknown>[] {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) {
+    out.push(`${where} is not a list`);
+    return [];
+  }
+  const cards: Record<string, unknown>[] = [];
+  for (const c of list) {
+    if (!isObject(c) || typeof c['id'] !== 'string') {
+      out.push(`${where} has a card without a string id`);
+      return cards;
+    }
+    cards.push(c);
+  }
+  return cards;
+}
+
+/** Everything the engine needs from the first `game_state` of a socket. */
+export function gameStateProblems(msg: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const players = msg['players'];
+  if (!Array.isArray(players)) return ['game_state.players is missing'];
+  const named: Record<string, unknown>[] = [];
+  for (const p of players) {
+    if (!isObject(p) || typeof p['player_id'] !== 'string') {
+      out.push('a player has no string player_id');
+      continue;
+    }
+    for (const key of CARD_LIST_KEYS) {
+      for (const c of cardListProblems(`player.${key}`, p[key], out)) if (typeof c['name'] === 'string') named.push(c);
+    }
+  }
+  // The re-skin overlays these fields; if edhplay renamed them the app would ignore the overlay.
+  if (named.length > 0) {
+    for (const f of ['card_print_id', 'front_image_uri'] as const) {
+      if (!named.some((c) => typeof c[f] === 'string')) out.push(`visible cards no longer carry ${f}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Checks the later frames the engine reads. Unknown frame types pass: new
+ * event types are harmless, only a change to one we read matters.
+ */
+export function frameProblems(msg: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const str = (k: string): void => {
+    if (typeof msg[k] !== 'string') out.push(`${String(msg['type'])}.${k} is not a string`);
+  };
+  switch (msg['type']) {
+    case 'move_card':
+      str('id');
+      str('zone');
+      break;
+    case 'cards_moved':
+      if (msg['cards'] === undefined && msg['moves'] === undefined && msg['card_ids'] === undefined && msg['count'] === undefined) {
+        out.push('cards_moved has none of cards/moves/card_ids/count');
+      }
+      cardListProblems('cards_moved.cards', msg['cards'], out);
+      if (msg['moves'] !== undefined && !Array.isArray(msg['moves'])) out.push('cards_moved.moves is not a list');
+      break;
+    case 'library_viewed':
+      cardListProblems('library_viewed.viewed_library_cards', msg['viewed_library_cards'], out);
+      break;
+    case 'chat_message_received':
+      str('player_id');
+      str('message');
+      break;
+  }
+  return out;
 }

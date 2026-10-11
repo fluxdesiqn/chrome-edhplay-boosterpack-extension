@@ -17,9 +17,20 @@ export const SET_NAMES: Record<BundledSet, string> = {
   neo: 'Kamigawa: Neon Dynasty',
 };
 
+/** The Neon Dynasty Commander decks: a Kamigawa product fetched from Scryfall like any other runtime set. */
+export const NEC_CODE: SetCode = 'nec';
+/** Products in the picker's Kamigawa row: the four bundled sets plus the Neon Dynasty Commander decks. */
+export const KAMIGAWA_PRODUCTS: readonly { code: SetCode; name: string }[] = [
+  ...SET_CODES.map((code) => ({ code, name: SET_NAMES[code] })),
+  { code: NEC_CODE, name: 'Neon Dynasty Commander' },
+];
+export function isKamigawaProduct(set: SetCode): boolean {
+  return KAMIGAWA_PRODUCTS.some((p) => p.code === set);
+}
+
 export type Rarity = 'c' | 'u' | 'r' | 'm';
 
-/** Booster products. Only Neon Dynasty was sold as Set and Collector boosters. */
+/** Booster products. Of the bundled sets only Neon Dynasty was sold as Set and Collector boosters. */
 export type PackKind = 'draft' | 'set' | 'collector';
 export const PACK_KINDS: readonly PackKind[] = ['draft', 'set', 'collector'];
 export const PACK_KIND_NAMES: Record<PackKind, string> = { draft: 'Play Booster', set: 'Set Booster', collector: 'Collector Booster' };
@@ -32,12 +43,21 @@ export const AVAILABLE_PACKS: Record<BundledSet, readonly PackKind[]> = {
   sok: ['draft'],
   neo: ['draft', 'set', 'collector'],
 };
-/** Booster kinds that can be rolled for a set (runtime-fetched sets are draft only). */
-export function availablePacks(set: SetCode): readonly PackKind[] {
-  return isBundledSet(set) ? AVAILABLE_PACKS[set] : ['draft'];
+const RUNTIME_DRAFT_ONLY: readonly PackKind[] = ['draft'];
+const RUNTIME_WITH_COLLECTOR: readonly PackKind[] = ['draft', 'collector'];
+/**
+ * Booster kinds that can be rolled for a set. Bundled sets use the product table;
+ * a runtime set offers Collector Boosters when its registered info (or the
+ * `meta` of its Scryfall set summary, before it is registered) says so — see
+ * `setInfoFor`. Every peer derives the same answer from the same Scryfall meta.
+ */
+export function availablePacks(set: SetCode, meta?: { type: string; released: string }): readonly PackKind[] {
+  if (isBundledSet(set)) return AVAILABLE_PACKS[set];
+  const info = runtimeSetInfo.get(set) ?? (meta ? setInfoFor(meta.type, meta.released) : undefined);
+  return info?.collector ? RUNTIME_WITH_COLLECTOR : RUNTIME_DRAFT_ONLY;
 }
 /** Human name for a set: bundled name, a registered runtime name, or the upper-cased code. */
-const runtimeSetNames = new Map<string, string>();
+const runtimeSetNames = new Map<string, string>(KAMIGAWA_PRODUCTS.map((p) => [p.code, p.name]));
 export function registerSetName(set: SetCode, name: string): void {
   runtimeSetNames.set(set, name);
 }
@@ -46,8 +66,27 @@ export function setName(set: SetCode): string {
 }
 /** Sets from February 2024 on were sold as Play Boosters (14 cards) instead of Draft Boosters. */
 export const PLAY_BOOSTER_FROM = '2024-02-01';
-const runtimeSetInfo = new Map<string, { playBooster: boolean }>();
-export function registerSetInfo(set: SetCode, info: { playBooster: boolean }): void {
+/** Collector Boosters exist for booster sets from Throne of Eldraine (2019-10-04) on. */
+export const COLLECTOR_BOOSTER_FROM = '2019-10-04';
+/** Scryfall set types that were sold as boosters. */
+export const BOOSTER_SET_TYPES: ReadonlySet<string> = new Set(['core', 'expansion', 'masters', 'draft_innovation', 'funny']);
+/** Scryfall set types the picker offers although they were never boosters (preconstructed Commander decks). */
+export const PRECON_SET_TYPES: ReadonlySet<string> = new Set(['commander']);
+/** What a runtime set was sold as, derived from its Scryfall set type and release date. */
+export interface SetInfo {
+  /** sold as boosters at all (false for preconstructed deck sets: a "pack" is just 15 random cards of the set) */
+  booster: boolean;
+  /** 14-card Play Boosters (2024-02 on) rather than 15-card Draft Boosters */
+  playBooster: boolean;
+  /** Collector Boosters were sold for the set */
+  collector: boolean;
+}
+export function setInfoFor(type: string, released: string): SetInfo {
+  const booster = BOOSTER_SET_TYPES.has(type);
+  return { booster, playBooster: released >= PLAY_BOOSTER_FROM, collector: booster && released >= COLLECTOR_BOOSTER_FROM };
+}
+const runtimeSetInfo = new Map<string, SetInfo>();
+export function registerSetInfo(set: SetCode, info: SetInfo): void {
   runtimeSetInfo.set(set, info);
 }
 export function isPlayBoosterSet(set: SetCode, released?: string): boolean {
@@ -56,10 +95,20 @@ export function isPlayBoosterSet(set: SetCode, released?: string): boolean {
   if (info) return info.playBooster;
   return !!released && released >= PLAY_BOOSTER_FROM;
 }
-/** The booster name a player would recognise: the draft-style pack is a "Play Booster" for modern sets. */
+/** Test hook: forget every registered runtime set name and info (bundled data is untouched). */
+export function _resetSetInfo(): void {
+  runtimeSetInfo.clear();
+  runtimeSetNames.clear();
+  for (const p of KAMIGAWA_PRODUCTS) runtimeSetNames.set(p.code, p.name);
+}
+/**
+ * The booster name a player would recognise. The standard booster is shown as a
+ * "Play Booster" everywhere (the era-correct 14/15-card product is rolled
+ * internally); a set that was never sold as boosters just opens a "Pack".
+ */
 export function kindName(set: SetCode, kind: PackKind, released?: string): string {
-  void set;
   void released;
+  if (kind === 'draft' && !isBundledSet(set) && runtimeSetInfo.get(set)?.booster === false) return 'Pack';
   return PACK_KIND_NAMES[kind];
 }
 export function packLabel(set: SetCode, kind: PackKind): string {

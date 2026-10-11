@@ -13,6 +13,10 @@ export interface SocketCtx {
   spectator: boolean;
   confirmed: boolean;
   binaryOut: boolean;
+  /** protocol_version from the first game_state (null until then). */
+  protocolVersion: number | null;
+  /** Shape problems that disabled the socket (`unsupported`) or paused automation (drift). */
+  problems: string[];
 }
 
 export interface Diag {
@@ -36,7 +40,7 @@ export interface OfferCard {
 
 export type MainToIso =
   | { type: 'hello' }
-  | { type: 'socket'; ev: 'opened' | 'confirmed' | 'closed' | 'unsupported'; ctx: SocketCtx }
+  | { type: 'socket'; ev: 'opened' | 'confirmed' | 'closed' | 'unsupported' | 'drift'; ctx: SocketCtx }
   | { type: 'phase'; phase: GamePhase }
   | { type: 'zones'; snapshot: ZoneSnapshot }
   | { type: 'state'; state: HokGameState | null }

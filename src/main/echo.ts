@@ -30,7 +30,7 @@ export class EchoWaiter {
   }
 
   waitFor(pred: (frame: Record<string, unknown>) => boolean, timeoutMs: number, label = 'echo'): Promise<Record<string, unknown>> {
-    return new Promise((resolve, reject) => {
+    const p = new Promise<Record<string, unknown>>((resolve, reject) => {
       const w: Waiter = {
         pred,
         resolve,
@@ -42,6 +42,10 @@ export class EchoWaiter {
       };
       this.waiters.add(w);
     });
+    // A sequence that aborts (e.g. its send was refused) never awaits its wait; keep that timeout quiet.
+    // Callers that do await still see the rejection.
+    p.catch(() => undefined);
+    return p;
   }
 
   waitForType<T extends Record<string, unknown>>(type: string, pred: (m: T) => boolean, timeoutMs: number): Promise<T> {

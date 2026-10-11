@@ -13,7 +13,7 @@
  */
 import { SET_DATA } from './data';
 import type { RuntimeSetData } from './runtime';
-import { type CardRef, type PackCard, type SetCode, type SetData, isBundledSet, parseRef, registerSetInfo, registerSetName } from './types';
+import { type CardRef, type PackCard, type SetCode, type SetData, isBundledSet, parseRef, registerSetInfo, registerSetName, setInfoFor } from './types';
 
 export type AnySetData = SetData | RuntimeSetData;
 
@@ -89,7 +89,9 @@ export function registerSetData(data: RuntimeSetData): void {
   }
   runtimeSets.set(data.code, data);
   registerSetName(data.code, data.name);
-  registerSetInfo(data.code, { playBooster: data.packSize === 14 });
+  // The pack size the data was built with is authoritative; products come from the Scryfall set meta.
+  const info = data.setType !== undefined ? setInfoFor(data.setType, data.released) : { booster: true, playBooster: false, collector: false };
+  registerSetInfo(data.code, { ...info, playBooster: data.packSize === 14 });
   rebuildIdIndex();
   indexCache.delete(data.code);
   notify();

@@ -62,7 +62,10 @@ const SETS: SetSummary[] = [
   { code: 'dsk', name: 'Duskmourn: House of Horror', released: '2024-09-27', cardCount: 286, type: 'expansion' },
   { code: 'khm', name: 'Kaldheim', released: '2021-02-05', cardCount: 285, type: 'expansion' },
   { code: 'neo', name: 'Kamigawa: Neon Dynasty', released: '2022-02-18', cardCount: 302, type: 'expansion' },
+  { code: 'nec', name: 'Neon Dynasty Commander', released: '2022-02-18', cardCount: 179, type: 'commander' },
+  { code: 'rna', name: 'Ravnica Allegiance', released: '2019-01-25', cardCount: 273, type: 'expansion' },
 ];
+const KAMIGAWA_ROW = ['Champions of Kamigawa', 'Betrayers of Kamigawa', 'Saviors of Kamigawa', 'Kamigawa: Neon Dynasty', 'Neon Dynasty Commander'];
 
 function mountPicker(over: Partial<SetPickerProps> = {}) {
   const props: SetPickerProps = { sets: SETS, recent: [], value: 'neo', kind: 'draft', onChange: vi.fn(), ...over };
@@ -74,8 +77,8 @@ describe('SetPicker', () => {
     const { el } = mountPicker({ sets: null });
     expect(el.textContent).toContain('Loading sets…');
     expect(el.querySelector('.hok-sp-input')).toBeNull();
-    // Bundled sets and kind pills still render.
-    expect(el.querySelectorAll('.hok-sets .hok-btn').length).toBe(4);
+    // Kamigawa products and kind pills still render.
+    expect(el.querySelectorAll('.hok-sets .hok-btn').length).toBe(5);
     expect(el.querySelectorAll('.hok-pillbtn').length).toBe(2);
   });
 
@@ -88,16 +91,27 @@ describe('SetPicker', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it('hides the Kamigawa row when showKamigawa is false', () => {
-    const { el } = mountPicker({ value: 'khm', showKamigawa: false });
-    expect(el.querySelector('.hok-sets')).toBeNull();
+  it('always shows the Kamigawa row, Neon Dynasty Commander included; it opens as a draft-style pack', () => {
+    const onChange = vi.fn();
+    const { el } = mountPicker({ value: 'khm', kind: 'collector', onChange });
+    const btns = Array.from(el.querySelectorAll<HTMLButtonElement>('.hok-sets .hok-btn'));
+    expect(btns.map((b) => b.textContent)).toEqual(KAMIGAWA_ROW);
+    expect(btns.some((b) => b.classList.contains('selected'))).toBe(false);
+    click(btns[4]);
+    expect(onChange).toHaveBeenLastCalledWith('nec', 'draft');
+    // the "Selected" line is for sets outside the Kamigawa row only
+    const el2 = rerender(h(SetPicker, { sets: SETS, recent: [], value: 'nec', kind: 'draft', onChange }));
+    expect(el2.querySelector('.hok-sp-current')).toBeNull();
+    const pills = Array.from(el2.querySelectorAll<HTMLButtonElement>('.hok-pillbtn'));
+    expect(pills.map((p) => p.disabled)).toEqual([false, true]);
+    expect(pills[1]!.getAttribute('title')).toBe('Neon Dynasty Commander was not sold as Collector Boosters');
   });
 
   it('highlights the selected Kamigawa set and selecting one keeps an available kind', () => {
     const onChange = vi.fn();
     const { el } = mountPicker({ value: 'neo', kind: 'set', onChange });
     const btns = Array.from(el.querySelectorAll<HTMLButtonElement>('.hok-sets .hok-btn'));
-    expect(btns.map((b) => b.textContent)).toEqual(['Champions of Kamigawa', 'Betrayers of Kamigawa', 'Saviors of Kamigawa', 'Kamigawa: Neon Dynasty']);
+    expect(btns.map((b) => b.textContent)).toEqual(KAMIGAWA_ROW);
     expect(btns[3]!.classList.contains('selected')).toBe(true);
     // chk has no Set boosters: the kind falls back to draft.
     click(btns[0]);
@@ -151,13 +165,16 @@ describe('SetPicker', () => {
     expect(el.querySelectorAll('.hok-sp-result').length).toBe(0);
   });
 
-  it('Enter on a runtime set resets a collector kind to draft', () => {
+  it('Enter on a set without Collector Boosters resets a collector kind to draft; a set with them keeps it', () => {
     const onChange = vi.fn();
     const { el } = mountPicker({ kind: 'collector', onChange });
     const input = el.querySelector<HTMLInputElement>('.hok-sp-input')!;
+    typeInto(input, 'ravnica');
+    key(input, 'Enter');
+    expect(onChange).toHaveBeenLastCalledWith('rna', 'draft');
     typeInto(input, 'kald');
     key(input, 'Enter');
-    expect(onChange).toHaveBeenCalledWith('khm', 'draft');
+    expect(onChange).toHaveBeenLastCalledWith('khm', 'collector');
   });
 
   it('Escape clears the query and the input stops keydown propagation', () => {
@@ -178,15 +195,25 @@ describe('SetPicker', () => {
     }
   });
 
-  it('offers Play and Collector; Collector is disabled for a runtime set with a tooltip and enabled for neo', () => {
-    const { el } = mountPicker({ value: 'khm' });
+  it('offers Play and Collector; Collector is disabled for a pre-Eldraine set with a tooltip and enabled for neo and for later sets', () => {
+    const { el } = mountPicker({ value: 'rna' });
     const pills = Array.from(el.querySelectorAll<HTMLButtonElement>('.hok-pillbtn'));
     expect(pills.map((p) => p.textContent)).toEqual(['Play', 'Collector']);
     expect(pills.map((p) => p.disabled)).toEqual([false, true]);
-    expect(pills[1]!.getAttribute('title')).toBe('Kaldheim was not sold as Collector Boosters');
+    expect(pills[1]!.getAttribute('title')).toBe('Ravnica Allegiance was not sold as Collector Boosters');
     expect(pills[0]!.classList.contains('selected')).toBe(true);
     // The current selection is shown for a runtime set.
-    expect(el.querySelector('.hok-sp-current')!.textContent).toContain('Kaldheim');
+    expect(el.querySelector('.hok-sp-current')!.textContent).toContain('Ravnica Allegiance');
+
+    // Kaldheim (2021) had Collector Boosters: enabled, and picking it keeps a collector selection.
+    const onChange = vi.fn();
+    const elK = rerender(h(SetPicker, { sets: SETS, recent: ['khm'], value: 'rna', kind: 'collector', onChange }));
+    click(elK.querySelector('.hok-sp-chip'));
+    expect(onChange).toHaveBeenLastCalledWith('khm', 'collector');
+    const elK2 = rerender(h(SetPicker, { sets: SETS, recent: [], value: 'khm', kind: 'collector', onChange }));
+    const pillsK = Array.from(elK2.querySelectorAll<HTMLButtonElement>('.hok-pillbtn'));
+    expect(pillsK.map((p) => p.disabled)).toEqual([false, false]);
+    expect(pillsK[1]!.classList.contains('selected')).toBe(true);
 
     const el2 = rerender(h(SetPicker, { sets: SETS, recent: [], value: 'neo', kind: 'collector', onChange: vi.fn() }));
     const pills2 = Array.from(el2.querySelectorAll<HTMLButtonElement>('.hok-pillbtn'));

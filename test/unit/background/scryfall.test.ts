@@ -6,7 +6,7 @@ import {
   cnCompare,
   fetchSetCards,
   fetchSetList,
-  isBoosterSet,
+  isPickableSet,
   loadSetCards,
   packSizeFor,
   setCardsCacheKey,
@@ -21,6 +21,7 @@ const nonBasicUrl = (code: string): string => `${SEARCH}set:${code}+is:booster+-
 const basicUrl = (code: string): string => `${SEARCH}set:${code}+is:booster+t:basic&unique=prints&order=set`;
 const fallbackUrl = (code: string): string => `${SEARCH}set:${code}+-t:basic+-is:promo+-is:digital&unique=prints&order=set`;
 const fallbackBasicUrl = (code: string): string => `${SEARCH}set:${code}+t:basic+-is:promo+-is:digital&unique=prints&order=set`;
+const variantsUrl = (code: string): string => `${SEARCH}set:${code}+-is:booster+-t:basic+-is:promo+-is:digital&unique=prints&order=set`;
 const PAGE2 = `${SCRYFALL_BASE}/cards/search?format=json&page=2&q=set%3Azzz`;
 
 const card = (over: Record<string, unknown>): Record<string, unknown> => ({
@@ -114,6 +115,23 @@ function routes(): Record<string, Route> {
         ],
       },
     },
+    [variantsUrl('mkm')]: {
+      status: 200,
+      body: {
+        object: 'list',
+        has_more: false,
+        data: [
+          card({ id: 'mkm-1e', name: 'Clue', collector_number: '355', set: 'mkm', rarity: 'rare', frame_effects: ['extendedart'], promo_types: ['boosterfun'], finishes: ['nonfoil', 'foil'] }),
+          card({ id: 'mkm-1b', name: 'Clue', collector_number: '301', set: 'mkm', rarity: 'rare', border_color: 'borderless', promo_types: ['boosterfun'] }),
+          card({ id: 'mkm-1x', name: 'Clue', collector_number: '401', set: 'mkm', rarity: 'rare', border_color: 'borderless', finishes: ['etched'] }),
+          // dropped: bundle promo, theme-booster exclusive (no alternate frame), digital rebalanced, plain regular frame
+          card({ id: 'mkm-1p', name: 'Clue', collector_number: '400', set: 'mkm', rarity: 'rare', frame_effects: ['extendedart'], promo_types: ['bundle'] }),
+          card({ id: 'mkm-3t', name: 'Theme Card', collector_number: '290', set: 'mkm', rarity: 'uncommon', promo_types: ['themepack'] }),
+          card({ id: 'mkm-1a', name: 'A-Clue', collector_number: 'A-1', set: 'mkm', rarity: 'rare', frame_effects: ['showcase'], digital: true }),
+          card({ id: 'mkm-9', name: 'Plain Extra', collector_number: '9', set: 'mkm', rarity: 'common' }),
+        ],
+      },
+    },
     [nonBasicUrl('empty')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
     [fallbackUrl('empty')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
     [fallbackBasicUrl('empty')]: { status: 404, body: { object: 'error', code: 'not_found', status: 404 } },
@@ -152,7 +170,7 @@ describe('scryfall background client', () => {
     const sets = await fetchSetList();
     expect(calls).toEqual([`${SCRYFALL_BASE}/sets`]);
     expect(headers[0]).toMatchObject({ Accept: 'application/json', 'User-Agent': 'HoK-edhplay-extension/0.2' });
-    expect(sets.map((s) => s.code)).toEqual(['zzz', 'mkm', 'm21', '2xm', 'cmr', 'unf']);
+    expect(sets.map((s) => s.code)).toEqual(['zzz', 'mkm', 'm21', '2xm', 'cmr', 'unf', 'c21']);
     expect(sets[0]).toEqual({ code: 'zzz', name: 'Zeta Zone', released: '2005-06-03', cardCount: 165, type: 'expansion', iconSvg: 'https://svgs.scryfall.io/sets/zzz.svg' });
     expect(sets[1]).toEqual({ code: 'mkm', name: 'Murders at Karlov Manor', released: '2024-02-09', cardCount: 286, type: 'expansion' });
     expect('iconSvg' in sets[1]!).toBe(false);
@@ -169,14 +187,17 @@ describe('scryfall background client', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('isBoosterSet / toSetSummary / packSizeFor rules', () => {
-    expect(isBoosterSet({ code: 'a', name: 'a', set_type: 'expansion', card_count: 60 } as never)).toBe(true);
-    expect(isBoosterSet({ code: 'a', name: 'a', set_type: 'expansion', card_count: 59 } as never)).toBe(false);
-    expect(isBoosterSet({ code: 'a', name: 'a', set_type: 'expansion', card_count: 300, digital: true } as never)).toBe(false);
-    expect(isBoosterSet({ code: 'a', name: 'a', set_type: 'commander', card_count: 300 } as never)).toBe(false);
-    expect(isBoosterSet({ code: 'a', name: 'a', set_type: 'alchemy', card_count: 300 } as never)).toBe(false);
+  it('isPickableSet / toSetSummary / packSizeFor rules', () => {
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'expansion', card_count: 60 } as never)).toBe(true);
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'expansion', card_count: 59 } as never)).toBe(false);
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'expansion', card_count: 300, digital: true } as never)).toBe(false);
+    // Commander precons are offered (a pack is 15 random cards of the deck set); other non-booster types are not
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'commander', card_count: 300 } as never)).toBe(true);
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'commander', card_count: 59 } as never)).toBe(false);
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'alchemy', card_count: 300 } as never)).toBe(false);
+    expect(isPickableSet({ code: 'a', name: 'a', set_type: 'token', card_count: 300 } as never)).toBe(false);
     for (const t of ['core', 'expansion', 'masters', 'draft_innovation', 'funny']) {
-      expect(isBoosterSet({ code: 'a', name: 'a', set_type: t, card_count: 100 } as never)).toBe(true);
+      expect(isPickableSet({ code: 'a', name: 'a', set_type: t, card_count: 100 } as never)).toBe(true);
     }
     expect(toSetSummary({ code: 'a', name: 'A', set_type: 'core', card_count: 1 } as never)).toEqual({ code: 'a', name: 'A', released: '', cardCount: 1, type: 'core' });
     expect(packSizeFor('2024-02-01')).toBe(14);
@@ -199,6 +220,9 @@ describe('scryfall background client', () => {
     expect(data.packSize).toBe(15);
     expect(data.hasMythics).toBe(true);
     expect(data.basics).toEqual([]);
+    // a 2005 set: no Collector Boosters, so no variants query and an empty list
+    expect(data.variants).toEqual([]);
+    expect(data.setType).toBe('expansion');
     expect(typeof data.fetchedAt).toBe('number');
     expect(data.cards.map((c) => c.cn)).toEqual(['1', '2', '3', '10', '10a']);
     expect(data.cards.map((c) => c.name)).not.toContain('Bonus Sheet Card');
@@ -233,7 +257,7 @@ describe('scryfall background client', () => {
     }
 
     // cached 30 days; second call makes no fetch and returns the same shape
-    const raw = (await chrome.storage.local.get('hok:cache:' + setCardsCacheKey('zzz')))['hok:cache:sets:cards:zzz'] as { exp: number; v: unknown };
+    const raw = (await chrome.storage.local.get('hok:cache:' + setCardsCacheKey('zzz')))['hok:cache:sets:cards:v2:zzz'] as { exp: number; v: unknown };
     expect(raw.v).toEqual(data);
     expect(raw.exp - Date.now()).toBeGreaterThan(29.9 * 24 * 3600 * 1000);
     const n = calls.length;
@@ -246,13 +270,76 @@ describe('scryfall background client', () => {
     await fetchSetList();
     const before = calls.length;
     const data = await fetchSetCards('mkm');
-    expect(calls.slice(before)).toEqual([nonBasicUrl('mkm'), basicUrl('mkm')]);
+    expect(calls.slice(before)).toEqual([nonBasicUrl('mkm'), basicUrl('mkm'), variantsUrl('mkm')]);
     expect(data.name).toBe('Murders at Karlov Manor');
     expect(data.released).toBe('2024-02-09');
+    expect(data.setType).toBe('expansion');
     expect(data.packSize).toBe(14);
     expect(data.hasMythics).toBe(false);
     expect(data.basics.map((c) => c.cn)).toEqual(['271', '272']);
     expect(data.cards.map((c) => c.r)).toEqual(['r', 'c']);
+    // Collector Booster material: alternate frames only, promos/digital/theme-pack/regular-frame extras dropped, sorted by collector number
+    expect(data.variants!.map((c) => [c.cn, c.v, c.co])).toEqual([
+      ['301', 'b', true],
+      ['355', 'e', true],
+      ['401', 'x', true],
+    ]);
+    expect(data.variants![0]).toMatchObject({ id: 'mkm-1b', name: 'Clue', r: 'r' });
+  });
+
+  it('moves alternate frames that were in draft boosters out of the regular pool', async () => {
+    const r = routes();
+    r[nonBasicUrl('eld')] = {
+      status: 200,
+      body: {
+        object: 'list',
+        has_more: false,
+        data: [
+          card({ id: 'eld-1', name: 'Knight', collector_number: '1', set: 'eld', rarity: 'uncommon' }),
+          card({ id: 'eld-1s', name: 'Knight', collector_number: '280', set: 'eld', rarity: 'uncommon', frame_effects: ['showcase'] }),
+          card({ id: 'eld-2', name: 'Goose', collector_number: '2', set: 'eld', rarity: 'common' }),
+        ],
+      },
+    };
+    r[basicUrl('eld')] = { status: 404, body: {} };
+    r[variantsUrl('eld')] = {
+      status: 200,
+      body: { object: 'list', has_more: false, data: [card({ id: 'eld-1s', name: 'Knight', collector_number: '280', set: 'eld', rarity: 'uncommon', frame_effects: ['showcase'] }), card({ id: 'eld-2e', name: 'Goose', collector_number: '300', set: 'eld', rarity: 'common', frame_effects: ['extendedart'] })] },
+    };
+    r[`${SCRYFALL_BASE}/sets/eld`] = { status: 200, body: { code: 'eld', name: 'Throne of Eldraine', set_type: 'expansion', card_count: 269, released_at: '2019-10-04' } };
+    installFetch(r);
+    const data = await fetchSetCards('eld');
+    expect(data.cards.map((c) => c.id)).toEqual(['eld-1', 'eld-2']);
+    // the in-booster showcase is a variant without `co`; the collector-only one has it; no duplicate ids
+    expect(data.variants!.map((c) => [c.id, c.v, c.co])).toEqual([
+      ['eld-1s', 's', undefined],
+      ['eld-2e', 'e', true],
+    ]);
+  });
+
+  it('a Commander precon set is fetched through the fallback path with no variants', async () => {
+    const r = routes();
+    r[`${SCRYFALL_BASE}/sets/nec`] = { status: 200, body: { code: 'nec', name: 'Neon Dynasty Commander', set_type: 'commander', card_count: 179, released_at: '2022-02-18' } };
+    r[nonBasicUrl('nec')] = { status: 404, body: {} };
+    r[fallbackUrl('nec')] = {
+      status: 200,
+      body: {
+        object: 'list',
+        has_more: false,
+        data: [
+          card({ id: 'nec-1', name: 'Kotori', collector_number: '1', set: 'nec', rarity: 'mythic' }),
+          card({ id: 'nec-1e', name: 'Kotori', collector_number: '80', set: 'nec', rarity: 'mythic', frame_effects: ['extendedart'] }),
+          card({ id: 'nec-2', name: 'Buried Ruin', collector_number: '2', set: 'nec', rarity: 'uncommon' }),
+        ],
+      },
+    };
+    r[fallbackBasicUrl('nec')] = { status: 404, body: {} };
+    installFetch(r);
+    const data = await fetchSetCards('nec');
+    expect(data.setType).toBe('commander');
+    expect(data.cards.map((c) => c.id)).toEqual(['nec-1', 'nec-2']);
+    expect(data.variants).toEqual([]);
+    expect(data.packSize).toBe(15);
   });
 
   it('loadSetCards reports failures as {data: null, error} (unknown set, no booster cards)', async () => {
@@ -277,9 +364,14 @@ describe('scryfall background client', () => {
     const r = await loadSetCards('tmt');
     expect(r.error).toBeUndefined();
     const data = r.data!;
-    // one printing per name, lowest collector number wins (showcase/extended variants dropped)
+    // one printing per name, lowest collector number wins; showcase/extended printings become variants
     expect(data.cards.map((c) => c.cn)).toEqual(['1', '2', '3']);
     expect(data.cards.map((c) => c.id)).toEqual(['tmt-1', 'tmt-2', 'tmt-3']);
+    expect(data.variants!.map((c) => [c.id, c.v])).toEqual([
+      ['tmt-1s', 's'],
+      ['tmt-2e', 'e'],
+    ]);
+    expect(data.setType).toBe('expansion');
     expect(data.basics).toHaveLength(1);
     expect(data.hasMythics).toBe(true);
     expect(data.packSize).toBe(14);
