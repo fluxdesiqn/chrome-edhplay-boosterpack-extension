@@ -1,5 +1,6 @@
 import type { CardRef, RolledPack, SetCode } from './packs/types';
 import type { Zone } from './protocol';
+import { DEFAULT_CUBE_ID } from './cube/defaults';
 
 export interface Mapping {
   ref: CardRef;
@@ -178,6 +179,10 @@ export interface Config {
   minBlankCopies: number;
   preferredPlaceholderName: string;
   panelCollapsed: boolean;
+  /** Paint carrier cards as the custom cards of `cubeId`. */
+  cubeEnabled: boolean;
+  /** CubeForge cube id whose custom cards are played. */
+  cubeId: string;
 }
 
 export const defaultConfig: Config = {
@@ -188,6 +193,8 @@ export const defaultConfig: Config = {
   minBlankCopies: 50,
   preferredPlaceholderName: 'Wastes',
   panelCollapsed: false,
+  cubeEnabled: true,
+  cubeId: DEFAULT_CUBE_ID,
 };
 
 export interface LedgerEntry {

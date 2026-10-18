@@ -3,6 +3,7 @@ import { cacheClear, cacheGet, cacheSet } from './cache';
 import { pickPrint, searchPrintsByName } from './edhplay-api';
 import { acquireLock, releaseLock } from './lock';
 import { fetchSetList, loadSetCards } from './scryfall';
+import { fetchCube } from './cubeforge';
 
 const ID_TTL = 30 * 24 * 3600 * 1000;
 
@@ -66,6 +67,8 @@ export async function handleRpc(req: Rpc, sender: chrome.runtime.MessageSender):
     }
     case 'sets.cards':
       return loadSetCards(req.set);
+    case 'cube.fetch':
+      return fetchCube(req.cubeId, req.force);
     case 'prints.resolve': {
       const out: Record<string, { card_print_id: string; card_id: string } | null> = {};
       for (const name of req.names) {

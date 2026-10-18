@@ -105,6 +105,11 @@ export class ZoneIndex {
     return this.cards.size;
   }
 
+  /** Every indexed card. */
+  all(): IndexedCard[] {
+    return [...this.cards.values()];
+  }
+
   snapshot(): CardSummary[] {
     const out: CardSummary[] = [];
     for (const ids of this.lists.values()) {

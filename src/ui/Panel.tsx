@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { IsoToMain } from '@shared/bridge-contract';
 import { KAMIGAWA_PRODUCTS, SELECTABLE_KINDS, availablePacks, isKamigawaProduct, packLabel, setName, type PackKind, type SetCode } from '@shared/packs/types';
-import { config, diags, ledger, mulliganChoose, needsReload, offer, peers, phase, pileView, readOnly, requestSetList, screen, seq, setList, setListError, setListLoader, socket, state, zones } from './machine';
+import { cubeIdFromUrl } from '@shared/cube/parse';
+import { config, cubeCards, cubeStatus, diags, ledger, mulliganChoose, needsReload, offer, peers, phase, pileView, readOnly, requestSetList, screen, seq, setList, setListError, setListLoader, socket, state, zones } from './machine';
 import { SetPicker } from './panels/SetPicker';
 import { PileView } from './panels/PileView';
 import { MulliganChooser } from './panels/MulliganChooser';
@@ -10,11 +11,12 @@ export interface PanelProps {
   send: (msg: IsoToMain) => void;
   onConfig: (patch: Partial<typeof config.value>) => void;
   onExportRecord: () => void;
+  onCubeRefresh: () => void;
 }
 
-type Tab = 'game' | 'peers' | 'diag';
+type Tab = 'game' | 'cube' | 'peers' | 'diag';
 
-export function Panel({ send, onConfig, onExportRecord }: PanelProps) {
+export function Panel({ send, onConfig, onExportRecord, onCubeRefresh }: PanelProps) {
   const [tab, setTab] = useState<Tab>('game');
   const collapsed = config.value.panelCollapsed;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -40,14 +42,15 @@ export function Panel({ send, onConfig, onExportRecord }: PanelProps) {
         <button class="hok-iconbtn" title="Collapse" onClick={() => onConfig({ panelCollapsed: true })}>–</button>
       </div>
       <div class="hok-tabs">
-        {(['game', 'peers', 'diag'] as Tab[]).map((t) => (
+        {(['game', 'cube', 'peers', 'diag'] as Tab[]).map((t) => (
           <button class={`hok-tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-            {t === 'game' ? 'Game' : t === 'peers' ? `Peers (${peers.value.length})` : 'Diagnostics'}
+            {t === 'game' ? 'Game' : t === 'cube' ? 'Cube' : t === 'peers' ? `Peers (${peers.value.length})` : 'Diagnostics'}
           </button>
         ))}
       </div>
       <div class="hok-body">
         {tab === 'game' && <GameTab send={send} onConfig={onConfig} />}
+        {tab === 'cube' && <CubeTab send={send} onConfig={onConfig} onCubeRefresh={onCubeRefresh} />}
         {tab === 'peers' && <PeersTab send={send} />}
         {tab === 'diag' && <DiagTab send={send} onExportRecord={onExportRecord} />}
       </div>
@@ -483,6 +486,65 @@ function ChoosePack({ send }: { send: (m: IsoToMain) => void }) {
       )}
       <div style={{ height: 6 }} />
       <button class="hok-btn danger block sm" onClick={() => send({ type: 'cmd', cmd: 'cancel' })}>Cancel</button>
+    </div>
+  );
+}
+
+function CubeTab({ send, onConfig, onCubeRefresh }: { send: (m: IsoToMain) => void; onConfig: PanelProps['onConfig']; onCubeRefresh: () => void }) {
+  const st = cubeStatus.value;
+  const cfg = config.value;
+  const [query, setQuery] = useState('');
+  const [all, setAll] = useState(false);
+  const [url, setUrl] = useState('');
+  const sk = socket.value;
+  const canCreate = !!sk && !sk.ctx.spectator && !readOnly.value && cfg.cubeEnabled;
+  const q = query.trim().toLowerCase();
+  const shown = cubeCards.value.filter((c) => (all || c.considering) && (!q || c.name.toLowerCase().includes(q))).slice(0, 30);
+  const useUrl = () => {
+    const id = cubeIdFromUrl(url);
+    if (id) {
+      onConfig({ cubeId: id });
+      setUrl('');
+    }
+  };
+  return (
+    <div>
+      <p class="hok-h">Cube</p>
+      {st?.name ? (
+        <div class="hok-section">
+          <div class="hok-row"><span>{st.name}</span><span class={`hok-badge ${st.source === 'live' ? 'ok' : ''}`}>{st.source === 'live' ? 'live' : 'built in'}</span></div>
+          <div class="hok-muted">{st.cards} custom cards · {st.considering} tokens & back faces · {st.backFaces} double-faced</div>
+          {st.unassigned.length > 0 && <div class="hok-note err">{st.unassigned.length} card(s) have no carrier yet and cannot be played: {st.unassigned.slice(0, 5).join(', ')}{st.unassigned.length > 5 ? '…' : ''}. Rebuild the extension data (npm run cube).</div>}
+          {st.error && <div class="hok-note warn">CubeForge refresh failed ({st.error}); using the {st.source === 'live' ? 'last fetched' : 'built-in'} copy.</div>}
+        </div>
+      ) : (
+        <div class="hok-note warn">No cube data for {cfg.cubeId.slice(0, 8)}. Refresh, or check the cube is public.</div>
+      )}
+      <label class="hok-check">
+        <input type="checkbox" checked={cfg.cubeEnabled} onChange={(e) => onConfig({ cubeEnabled: (e.target as HTMLInputElement).checked })} />
+        Show custom cube cards (deck builder and games)
+      </label>
+      <div class="hok-row">
+        <input class="hok-input" style={{ flex: 1 }} placeholder="Other CubeForge cube URL" value={url} onInput={(e) => setUrl((e.target as HTMLInputElement).value)} />
+        <button class="hok-btn secondary sm" disabled={!cubeIdFromUrl(url)} onClick={useUrl}>Use</button>
+        <button class="hok-btn secondary sm" onClick={onCubeRefresh}>Refresh</button>
+      </div>
+      <div class="hok-note">Build decks in edhplay's deck builder: search a custom card's name, or import a CubeForge decklist. Play them in a <b>Free Commander</b> room. Everyone at the table needs the extension.</div>
+      <div style={{ height: 8 }} />
+      <p class="hok-h">Create a token</p>
+      <div class="hok-row">
+        <input class="hok-input" style={{ flex: 1 }} placeholder="Search…" value={query} onInput={(e) => setQuery((e.target as HTMLInputElement).value)} />
+        <label class="hok-check"><input type="checkbox" checked={all} onChange={(e) => setAll((e.target as HTMLInputElement).checked)} />all cards</label>
+      </div>
+      {!canCreate && <div class="hok-muted">Join a game as a player to create tokens. edhplay's own Create Token search lists these cards too.</div>}
+      <div class="hok-cards hok-cube-cards">
+        {shown.map((c) => (
+          <div class="hok-card" title={`${c.name} — ${c.typeLine}`} onClick={() => canCreate && send({ type: 'cmd', cmd: 'cube-token', key: c.key })}>
+            <img src={c.image} alt={c.name} loading="lazy" />
+            <div class="hok-cap">{c.name}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /** UI-side state, fed by bridge messages from the MAIN-world engine. */
 import { signal, computed } from '@preact/signals';
-import type { Diag, MainToIso, OfferCard, SocketCtx } from '@shared/bridge-contract';
+import type { CubeCardSummary, CubeStatus, Diag, MainToIso, OfferCard, SocketCtx } from '@shared/bridge-contract';
 import type { CardSummary, RolledPackRecord } from '@shared/state';
 import type { SetSummary } from '@shared/packs/runtime';
 import type { Activation, Config, GamePhase, HokGameState, LedgerEntry, PeerView } from '@shared/state';
@@ -20,6 +20,8 @@ export const needsReload = signal(false);
 export const config = signal<Config>(defaultConfig);
 export const readOnly = signal(false);
 export const bridgeReady = signal(false);
+export const cubeStatus = signal<CubeStatus | null>(null);
+export const cubeCards = signal<CubeCardSummary[]>([]);
 
 /** Runtime set list for the pack chooser (loaded on demand by the content script). */
 export const setList = signal<SetSummary[] | null>(null);
@@ -78,6 +80,10 @@ export const screen = computed<Screen>(() => {
 
 export function applyMainMessage(msg: MainToIso): void {
   switch (msg.type) {
+    case 'cube-status':
+      cubeStatus.value = msg.status;
+      cubeCards.value = msg.cards;
+      break;
     case 'socket':
       socket.value = { ev: msg.ev, ctx: msg.ctx };
       if (msg.ev === 'confirmed') needsReload.value = false;

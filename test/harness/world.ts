@@ -8,6 +8,7 @@
  */
 import { vi } from 'vitest';
 import { Engine } from '@main/engine';
+import type { CubeRuntime } from '@main/cube/runtime';
 import { installWsTap, type WsTap } from '@main/ws-tap';
 import { Bridge } from '@shared/bridge';
 import type { Diag, IsoToMain, MainToIso } from '@shared/bridge-contract';
@@ -127,6 +128,7 @@ export class IsoBridge {
 export interface WorldOptions {
   playerId: string;
   roomId?: string;
+  cube?: CubeRuntime;
 }
 
 export interface World {
@@ -159,7 +161,7 @@ export function createWorld(opts: WorldOptions): World {
   const win = makeFakeWindow(opts.playerId);
   const iso = new IsoBridge(win); // registered before the engine so the first `hello` lands
   const tap = installWsTap(win);
-  const engine = new Engine(tap, win);
+  const engine = new Engine(tap, win, opts.cube ?? null);
   const appFrames: Frame[] = [];
   let socket: WebSocket | null = null;
 

@@ -221,8 +221,10 @@ export type OutboundAction =
   | { type: 'keep_hand'; cards_to_bottom: string[] }
   /** UI gesture: type into the chat box. */
   | { type: 'send_chat_message'; message: string }
-  /** UI gesture: create card dialog → Sideboard tab (or a token). */
+  /** UI gesture: create card dialog → Sideboard tab. */
   | { type: 'create_card'; card_print_id: string }
+  /** UI gesture: create card dialog → Tokens tab → pick a card (the client sends the whole card). */
+  | { type: 'create_card'; card: WireCard }
   /** Stock client action the app itself issues when it detects inconsistency. */
   | { type: 'resync' }
   | { type: 'pong' };

@@ -32,6 +32,19 @@ If your commander is not Heroes of Kamigawa, the panel switches to **second deck
 
 Any Magic set can be opened in either mode: pick it from the searchable set list (booster sets and Commander precon sets with 60 or more cards) or press **Random set** for a random one. The card list is fetched from Scryfall once and cached, and card identities are matched to edhplay prints as they are needed. A "Play" booster is rolled with the era-correct size, 14 cards for sets from 2024 on and 15 before, without asking. **Collector** is offered for every booster set from Throne of Eldraine (October 2019) on: the set's showcase, borderless, extended-art and foil-etched printings are fetched alongside the regular ones and a 15-card Collector Booster is rolled from them on a generic premier-set layout (foil basic, foil commons and uncommons, alternate-frame commons and uncommons, extended-art, showcase/borderless and etched rares, a foil rare). Sets Scryfall has not yet flagged for boosters fall back to their regular printings. In Heroes mode the panel reminds you that non-Kamigawa packs are a house rule.
 
+## Custom cube cards (CubeForge)
+
+The extension also plays the custom cards of a [CubeForge](https://cubeforge.app) cube, out of the box [The Cursed Apple Commander Cube](https://cubeforge.app/cubes/0f00d960-d538-4a53-a7eb-5ca3105d0802). Real Magic cards in the cube are played as normal; the custom ones need the extension.
+
+edhplay only knows real cards, so every custom card rides on its own **carrier**: an obscure real card (mostly Portal Three Kingdoms, Portal and old legends nobody plays) that is assigned to that custom card permanently. Decks hold the carrier and the server deals with the carrier, while every player's extension paints it as the custom card everywhere: deck builder, deck lists, lobby, hand, battlefield, card info dialog. Because the mapping is fixed per cube, nothing has to be synced at the table and hidden zones stay hidden. Legendary custom creatures and planeswalkers get legendary carriers so they can sit in the command zone.
+
+- **Building a deck**: in edhplay's deck builder, type a custom card's name into *Add a card…*; the custom cards appear at the top of the results and add their carrier. You can also paste a decklist exported from CubeForge into edhplay's import: custom names are swapped for their carriers on the way out. Set the deck's format to **Free** (custom decks don't validate) and play in a **Free Commander** room.
+- **Tokens** (the cube's *Considering* list: Barrel, Turret, Remling, Trooper, Firework, …): search them in edhplay's own *Create Token* dialog, or use the panel's **Cube** tab. Tokens are created with the custom name and art, so they read correctly even without the extension.
+- **Double-faced cards**: when a custom card's back is in the Considering list (Silver, Drunkard → Silver, Beast Inside; battles → their flipped side; The Baroness Hotel → The Distorted Baroness; The Thing Under Bow Bridge → its meld result The Rootbound Guardian; 18 in all), the card gets that back face and edhplay's normal **Flip** action transforms it. The card info dialog shows both faces.
+- **Cube tab** in the panel: switch cube cards on or off, refresh from CubeForge, point at another public CubeForge cube, and create custom tokens.
+
+The cube is fetched from CubeForge whenever edhplay loads (cached ten minutes), so text and art edits show up without an update. Cards added to the cube after a build take the next free carrier in the order they were added, which is the same on every player's machine; `npm run cube` freezes those assignments into the extension so later removals cannot shift them. **Everyone in the pod must run the same extension version**, and everyone needs it installed: without it a carrier looks like the real card it is (custom tokens still show correctly).
+
 ## Install without developer tools
 
 Download the newest `heroes-of-kamigawa-edhplay-vX.Y.Z.zip` from the GitHub **Releases** page, unzip it into a folder you will keep, then in Chrome open `chrome://extensions`, turn on *Developer mode*, click *Load unpacked* and pick that folder. Step-by-step instructions are in [`docs/INSTALL.md`](docs/INSTALL.md). Every tagged release is built and zipped automatically by GitHub Actions.
@@ -55,15 +68,16 @@ Development loop: `npm run watch` rebuilds on change; click *Reload* on the exte
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | Three bundles: MAIN-world tap, content script, background worker |
 | `npm run data` | Regenerate the bundled Kamigawa set data from Scryfall and edhplay (writes `src/shared/packs/data/`) |
+| `npm run cube [-- <cube url>]` | Refresh the baked CubeForge cube and its carrier table (writes `src/shared/cube/data/`; existing carriers never move) |
 
 ## Project layout
 
 ```
-src/main/        MAIN-world code: WebSocket tap, frame rewrite, zone index, engine, sweep/activation sequences
+src/main/        MAIN-world code: WebSocket tap, frame rewrite, zone index, engine, sweep/activation sequences, cube HTTP tap
 src/content/     ISOLATED content script: panel host, storage, tab lock, bridge to MAIN
 src/ui/          Preact panel
 src/background/  Service worker: identity lookups, per-room tab lock, storage.session access
-src/shared/      Pure logic shared by all three: protocol types, pack roller, sync codec, sweep planner, state machine
+src/shared/      Pure logic shared by all three: protocol types, pack roller, sync codec, sweep planner, state machine, cube catalog
 test/            Unit tests, fake pv4 server harness, end-to-end scenarios
 docs/            Developer message, verification checklist
 ```
@@ -79,6 +93,7 @@ edhplay's terms forbid manipulating game state through means the interface does 
 ## Limitations
 
 - One booster mechanic only; no other Heroes of the Realm cards.
+- Cube cards: CubeForge has no power/toughness fields, so a custom creature shows its P/T only on its art (edhplay's +1/+1 modifiers still work). Back faces are found by reading the front's rules text; a pairing the reader misses can be added to `parseCube`'s overrides. The carrier pool holds 430 cards (90 legendary), enough for about 120 more custom cards in this cube.
 - Token copies of a re-skinned card are created as a real-card token via the sideboard path, without copied counters.
 - Chat lines starting with `[HoK1]` are visible to players without the extension.
 - Pack collation is an approximation of the printed sheets: Draft boosters ignore foils; Neon Dynasty land slot is 50/50 dual vs ukiyo-e basic, flex slot is 1/3 uncommon, mythic 10/74. Set and Collector boosters follow the official slot structure (showcase, borderless, extended art, foil-etched printings, 21% foil land in Set boosters) with fixed odds where Wizards only published ranges. Foils are cosmetic in the reveal.

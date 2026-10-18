@@ -3,6 +3,7 @@ import type { RuntimeSetData, SetSummary } from './packs/runtime';
 import type { CardIdentity } from './protocol';
 import type { CardRef, PackKind, SetCode } from './packs/types';
 import type { RolledPackRecord } from './state';
+import type { CubeSnapshot } from './cube/types';
 
 export const BRIDGE_TAG = '__hok';
 export const BRIDGE_VERSION = 1;
@@ -31,6 +32,31 @@ export interface ZoneSnapshot {
   cards: CardSummary[];
   localPlayerId: string | null;
   players: Array<{ id: string; name: string }>;
+}
+
+/** What the page currently paints custom cube cards with. */
+export interface CubeStatus {
+  enabled: boolean;
+  cubeId: string | null;
+  name: string | null;
+  /** `baked`: data shipped in the extension; `live`: refreshed from CubeForge this session. */
+  source: 'none' | 'baked' | 'live';
+  fetchedAt: number | null;
+  cards: number;
+  considering: number;
+  backFaces: number;
+  /** Cards that found no carrier (pool exhausted): they cannot be played. */
+  unassigned: string[];
+  error: string | null;
+}
+
+/** A custom card as the panel lists it. */
+export interface CubeCardSummary {
+  key: string;
+  name: string;
+  typeLine: string;
+  image: string;
+  considering: boolean;
 }
 
 export interface OfferCard {
@@ -64,7 +90,8 @@ export type MainToIso =
   | { type: 'record'; frames: unknown[] }
   | { type: 'needs-reload' }
   /** A new game started in this room: forget everything shown for the previous one. */
-  | { type: 'game-reset' };
+  | { type: 'game-reset' }
+  | { type: 'cube-status'; status: CubeStatus; cards: CubeCardSummary[] };
 
 export type IsoToMain =
   | { type: 'hello_ack'; nonce: string }
@@ -94,6 +121,10 @@ export type IsoToMain =
   | { type: 'cmd'; cmd: 'pick'; toHand: number[] }
   | { type: 'cmd'; cmd: 'set-placeholder'; printId: string; name: string }
   | { type: 'cmd'; cmd: 'dev-map'; cardId: string; ref: CardRef }
+  /** Create a custom cube card as a token on the battlefield (create token dialog equivalent). */
+  | { type: 'cmd'; cmd: 'cube-token'; key: string }
+  /** A CubeForge snapshot of the configured cube (null + error when the fetch failed). */
+  | { type: 'cube-snapshot'; snapshot: CubeSnapshot | null; error?: string }
   | { type: 'cfg'; config: Config }
   | { type: 'record'; on: boolean };
 
@@ -114,6 +145,8 @@ export type Rpc =
   | { m: 'sets.list' }
   /** Runtime set data for one set (booster-eligible cards), cached. */
   | { m: 'sets.cards'; set: string }
+  /** Fetch a CubeForge cube (cached briefly unless `force`). */
+  | { m: 'cube.fetch'; cubeId: string; force?: boolean }
   | { m: 'cache.clear' }
   | { m: 'lock.acquire'; roomId: string }
   | { m: 'lock.release'; roomId: string };
@@ -124,6 +157,8 @@ export type RpcResult<R extends Rpc> = R extends { m: 'prints.resolve' | 'prints
     ? { sets: SetSummary[] }
     : R extends { m: 'sets.cards' }
       ? { data: RuntimeSetData | null; error?: string }
+      : R extends { m: 'cube.fetch' }
+        ? { snapshot: CubeSnapshot | null; error?: string }
       : R extends { m: 'lock.acquire' }
         ? { granted: boolean }
         : { ok: true };

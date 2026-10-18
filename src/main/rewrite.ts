@@ -1,8 +1,10 @@
 /**
  * Copy-on-write deep rewrite of wire messages: overlays a real card identity
- * onto every card-like object whose `id` is in the blank→identity index.
+ * onto every card-like object whose `id` is in the blank→identity index, and
+ * paints cube carriers (matched by card/print id) as their custom cards.
  */
 import { IDENTITY_ALWAYS_FIELDS, IDENTITY_IF_PRESENT_FIELDS, type CardIdentity } from '@shared/protocol';
+import { overlayCube, type CubeCatalog } from '@shared/cube/catalog';
 
 export interface RewriteResult<T> {
   msg: T;
@@ -41,19 +43,28 @@ const EMPTY_INDEX: ReadonlyMap<string, CardIdentity> = new Map();
 
 export class RewriteEngine {
   #index: ReadonlyMap<string, CardIdentity> = EMPTY_INDEX;
+  #cube: () => CubeCatalog | null = () => null;
 
   setIndex(index: ReadonlyMap<string, CardIdentity>): void {
     this.#index = index;
   }
 
+  /** Source of the active cube catalog (null when cube cards are off). */
+  setCube(cube: () => CubeCatalog | null): void {
+    this.#cube = cube;
+  }
+
   rewrite<T extends Record<string, unknown>>(msg: T): RewriteResult<T> {
     const touched: string[] = [];
-    if (this.#index.size === 0) return { msg, changed: false, touched };
+    this.#cat = this.#cube();
+    if (this.#index.size === 0 && !this.#cat) return { msg, changed: false, touched };
     const seen = new Set<object>();
     const out = this.#walk(msg, seen, touched);
     if (out === msg) return { msg, changed: false, touched };
     return { msg: out as T, changed: true, touched };
   }
+
+  #cat: CubeCatalog | null = null;
 
   /** Returns the same reference when nothing beneath `node` changed; otherwise a shallow-cloned container. */
   #walk(node: unknown, seen: Set<object>, touched: string[]): unknown {
@@ -67,12 +78,18 @@ export class RewriteEngine {
       let base: Record<string, unknown> = node;
       let cloned = false;
 
-      if (isCardLike(node) && node.is_token !== true) {
-        const identity = this.#index.get(node.id as string);
+      if (isCardLike(node)) {
+        const identity = node.is_token !== true ? this.#index.get(node.id as string) : undefined;
         if (identity) {
           base = overlayIdentity(node, identity);
           cloned = true;
           touched.push(node.id as string);
+        }
+        // Tokens too: a token copy of a carrier, or a custom token, is still a carrier.
+        const entry = this.#cat?.lookup(base);
+        if (entry) {
+          base = overlayCube(base, entry);
+          cloned = true;
         }
       }
 

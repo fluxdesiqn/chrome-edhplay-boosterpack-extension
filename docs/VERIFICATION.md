@@ -27,3 +27,18 @@ Run with three accounts (two with the extension, one without) in a **Free Comman
 - Late joiner / spectator with the extension: receives `state`, `pack`, `map` lines within ~10 s.
 - No red toasts from edhplay and no watchdog reconnects (Diagnostics → Connection stays `confirmed`) during the sweep and activations.
 - Protocol bump: if edhplay ships `pv=5`, the panel shows the unsupported banner and sends nothing.
+
+## Cube checks
+
+Two accounts with the extension, one without, a Free Commander room.
+
+- Deck builder: typing `yama` lists Yamato, Pursuer first; adding it shows the custom art in the deck list, the deck cover and the hover preview. Searching the carrier's own name (Adun Oakenshield) does not offer it.
+- Import a CubeForge decklist with custom names: no "not found" warning for custom cards.
+- Deck tile on the decks page and in the lobby shows the custom commander's name and art.
+- In game: custom cards in hand, on the battlefield and in the graveyard show the custom art for both extension users; the third account sees the carriers.
+- Card info dialog on a custom card shows its rules text (and both faces for a DFC).
+- **Flip** appears on Silver, Drunkard and Times Square; flipping shows the back face for both extension users. Check the server accepts `set_visibility flipped` for a single-faced carrier (no red toast, flip persists after a reload).
+- Create Token dialog: searching `barrel` lists the custom Barrel; picking it creates a token with the custom name and art, visible correctly to the third account too. Same through the panel's Cube tab.
+- Deck tokens: add Barrel to the deck's token section in the deck builder; if the server refuses non-token carriers there, note it (the Create Token search still works).
+- Token copy of a custom creature keeps the custom art.
+- Turn cube cards off in the Cube tab: carriers show as themselves without a reload; on again restores them.

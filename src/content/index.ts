@@ -10,6 +10,7 @@ import { defaultConfig } from '@shared/state';
 import { Panel } from '@ui/Panel';
 import { applyMainMessage, bridgeReady, config as configSig, readOnly, setList, setListError, setListLoader } from '@ui/machine';
 import type { RuntimeSetData, SetSummary } from '@shared/packs/runtime';
+import type { CubeSnapshot } from '@shared/cube/types';
 import { registerSetInfo, registerSetName, setInfoFor } from '@shared/packs/types';
 import { loadConfig, loadRoomState, saveConfig, saveRoomState } from './storage';
 import { RoomLock, rpc } from './lock';
@@ -110,6 +111,10 @@ async function hydrate(roomId: string): Promise<void> {
 async function init(): Promise<void> {
   config = await loadConfig();
   configSig.value = config;
+  // The page-side cube runtime starts from baked data; give it the user's choice
+  // and a fresh CubeForge copy (deck builder pages never get a `hydrate`).
+  bridge.send({ type: 'cfg', config });
+  void refreshCube(false);
   // Hydrate eagerly for the room in the URL so state is ready before the app connects.
   const m = GAME_PATH.exec(location.pathname);
   if (m?.[1]) {
@@ -117,6 +122,20 @@ async function init(): Promise<void> {
     bridge.send({ type: 'hydrate', roomId: m[1], state, config, readOnly: false });
   }
   watchForLateLoad();
+}
+
+let cubeFetchedFor: string | null = null;
+async function refreshCube(force: boolean): Promise<void> {
+  if (!config.cubeId) return;
+  const cubeId = config.cubeId;
+  cubeFetchedFor = cubeId;
+  try {
+    const res = await rpc<{ snapshot: CubeSnapshot | null; error?: string }>({ m: 'cube.fetch', cubeId, force });
+    if (cubeFetchedFor !== cubeId) return;
+    bridge.send({ type: 'cube-snapshot', snapshot: res?.snapshot ?? null, error: res?.error });
+  } catch (err) {
+    bridge.send({ type: 'cube-snapshot', snapshot: null, error: String(err) });
+  }
 }
 
 let sawSocket = false;
@@ -149,10 +168,12 @@ function mountPanel(): void {
   (document.body ?? document.documentElement).appendChild(host);
 
   const onConfig = (patch: Partial<Config>) => {
+    const cubeChanged = patch.cubeId !== undefined && patch.cubeId !== config.cubeId;
     config = { ...config, ...patch };
     configSig.value = config;
     void saveConfig(config);
     bridge.send({ type: 'cfg', config });
+    if (cubeChanged) void refreshCube(true);
   };
   const onExportRecord = () => {
     bridge.send({ type: 'cmd', cmd: 'export-record' });
@@ -166,7 +187,7 @@ function mountPanel(): void {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     }, 300);
   };
-  render(h(Panel, { send: (m) => bridge.send(m), onConfig, onExportRecord }), mount);
+  render(h(Panel, { send: (m) => bridge.send(m), onConfig, onExportRecord, onCubeRefresh: () => void refreshCube(true) }), mount);
   const revealMount = document.createElement('div');
   shadow.appendChild(revealMount);
   render(h(RevealHost, { send: (m) => bridge.send(m) }), revealMount);

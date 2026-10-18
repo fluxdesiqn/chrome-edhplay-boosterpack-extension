@@ -2,10 +2,10 @@
   "manifest_version": 3,
   "name": "Heroes of Kamigawa for EDHPlay",
   "version": "0.3.0",
-  "description": "Open sealed Kamigawa boosters at the table: adds the Heroes of Kamigawa booster-pile mechanic to edhplay.com games.",
+  "description": "Open sealed Kamigawa boosters at the table and play custom CubeForge cube cards on edhplay.com.",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],
-  "host_permissions": ["https://edhplay.com/*", "https://api.edhplay.com/*", "https://api.scryfall.com/*"],
+  "host_permissions": ["https://edhplay.com/*", "https://api.edhplay.com/*", "https://api.scryfall.com/*", "https://cubeforge.app/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     { "matches": ["https://edhplay.com/*"], "js": ["main-world.js"], "world": "MAIN", "run_at": "document_start" },

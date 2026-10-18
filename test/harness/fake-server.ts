@@ -412,6 +412,14 @@ export class FakeServer {
       }
 
       case 'create_card': {
+        // Token path: the client sends the whole card; the server forces a token onto the battlefield.
+        const sent = msg['card'];
+        if (typeof sent === 'object' && sent !== null) {
+          const token: WireCard = { ...(sent as WireCard), id: this.newId(), owner_id: pid, zone: 'battlefield', is_token: true };
+          z.battlefield.push(token);
+          this.broadcast(() => ({ type: 'card_created', player_id: pid, token }));
+          return;
+        }
         const print = String(msg['card_print_id']);
         const card: WireCard = {
           id: this.newId(),

@@ -213,3 +213,38 @@ describe('RewriteEngine copy-on-write', () => {
     expect(res.touched).toEqual(['b1', 'b1']);
   });
 });
+
+describe('RewriteEngine with a cube', () => {
+  // Imported lazily so the HoK-only tests above stay independent of cube data.
+  it('paints carriers (including tokens) as custom cards and stops when the cube is off', async () => {
+    const { CubeCatalog } = await import('@shared/cube/catalog');
+    const { parseCube } = await import('@shared/cube/parse');
+    const { cubeResponse, pool } = await import('./cube/fixture');
+    const cat = new CubeCatalog(parseCube(cubeResponse()), pool(), {});
+    const silver = cat.byName('Silver, Drunkard')!;
+    let on = true;
+    const e = new RewriteEngine();
+    e.setCube(() => (on ? cat : null));
+    const frame = {
+      type: 'game_state',
+      players: [
+        {
+          player_id: 'p1',
+          battlefield: [
+            { id: 'c1', card_id: silver.carrier.card_id, card_print_id: silver.carrier.card_print_id, name: 'Carrier 1', type_line: 'x', front_image_uri: 'carrier.jpg', back_image_uri: null, power: '3', toughness: '3', visibility: 'flipped' },
+            { id: 't1', card_print_id: silver.carrier.card_print_id, name: 'Carrier 1', front_image_uri: 'carrier.jpg', is_token: true },
+            { id: 'c2', card_id: 'real', card_print_id: 'real', name: 'Sol Ring', front_image_uri: 'sol.jpg' },
+          ],
+        },
+      ],
+    };
+    const r = e.rewrite(frame);
+    expect(r.changed).toBe(true);
+    const bf = (r.msg.players[0]!.battlefield as Array<Record<string, unknown>>);
+    expect(bf[0]).toMatchObject({ card_id: silver.carrier.card_id, name: 'Silver, Drunkard', front_image_uri: silver.card.image, back_image_uri: silver.back!.image, power: null, visibility: 'flipped' });
+    expect(bf[1]).toMatchObject({ name: 'Silver, Drunkard', is_token: true });
+    expect(bf[2]).toBe(frame.players[0]!.battlefield[2]);
+    on = false;
+    expect(e.rewrite(frame).changed).toBe(false);
+  });
+});

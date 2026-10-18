@@ -66,3 +66,4 @@ input.hok-input, select.hok-select { background: #120d1c; color: #fff; border: 1
 .hok-pillbtn { flex: 1; background: #24193a; border: 1px solid #4a3a66; color: #cfc6e0; padding: 5px 6px; border-radius: 999px; cursor: pointer; font-size: 11px; }
 .hok-pillbtn.selected { background: #6b4bd1; border-color: #6b4bd1; color: #fff; }
 .hok-pillbtn:disabled { opacity: .4; cursor: not-allowed; }
+.hok-cube-cards { grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }

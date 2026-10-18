@@ -39,6 +39,7 @@ import { ActionSender } from './actions';
 import { EchoWaiter } from './echo';
 import { localIdFromGameState, localIdFromStorage } from './local-player';
 import { RewriteEngine } from './rewrite';
+import type { CubeRuntime } from './cube/runtime';
 import { runSweep, SweepError } from './sequences/sweep';
 import { bottomCount, runMulliganBottom, runMulliganDraw } from './sequences/mulligan';
 import type { FrameDecision, OutboundDecision, WsTap } from './ws-tap';
@@ -85,6 +86,7 @@ export class Engine {
   constructor(
     private readonly tap: WsTap,
     win: Window & typeof globalThis = window,
+    private readonly cube: CubeRuntime | null = null,
   ) {
     this.actions = new ActionSender(tap);
     this.actions.onLedger = (entries) => this.bridge.send({ type: 'ledger', entries });
@@ -103,6 +105,11 @@ export class Engine {
     onRegistryChange(() => {
       this.rebuildIndex();
       this.pushOffer();
+    });
+    this.rewrite.setCube(() => this.cube?.active() ?? null);
+    this.cube?.onChange(() => {
+      this.pushCube();
+      this.reskinCube();
     });
     tap.setHandlers({
       onFrame: (ctx, msg) => this.onFrame(ctx, msg),
@@ -454,6 +461,7 @@ export class Engine {
         this.hydratedRoom = m.roomId;
         this.hydratedState = m.state;
         this.config = m.config;
+        this.cube?.configure(m.config.cubeId, m.config.cubeEnabled);
         this.readOnly = m.readOnly;
         if (this.state && this.state.roomId === m.roomId && m.state && m.state.updatedAt > this.state.updatedAt) {
           this.state = m.state;
@@ -463,6 +471,10 @@ export class Engine {
         break;
       case 'cfg':
         this.config = m.config;
+        this.cube?.configure(m.config.cubeId, m.config.cubeEnabled);
+        break;
+      case 'cube-snapshot':
+        this.cube?.applySnapshot(m.snapshot, m.error);
         break;
       case 'set-data':
         this.onSetData(m.set, m.data, m.error);
@@ -592,7 +604,61 @@ export class Engine {
       case 'export-record':
         this.bridge.send({ type: 'record', frames: [...this.record] });
         break;
+      case 'cube-token':
+        this.createCubeToken(m.key);
+        break;
     }
+  }
+
+  // ------------------------------------------------------------------ cube
+
+  /** Same message the create token dialog sends when a card is picked from its search. */
+  private createCubeToken(key: string): void {
+    const e = this.cube?.active()?.byKey(key);
+    if (!e) return;
+    if (!this.ctx || this.ctx.spectator || this.readOnly) {
+      this.diag('warn', 'cube token: join the game as a player in this tab first');
+      return;
+    }
+    const card = {
+      id: newCardId(),
+      card_print_id: e.carrier.card_print_id,
+      name: e.card.name,
+      type_line: e.card.typeLine,
+      front_image_uri: e.card.image,
+      back_image_uri: e.back?.image ?? null,
+      can_rotate: false,
+      is_token: true,
+      x: 0.15 + Math.random() * 0.1,
+      y: 0.5 + Math.random() * 0.1,
+      tapped: false,
+      visibility: 'default' as const,
+      custom_counters: {},
+      power_modifier: 0,
+      toughness_modifier: 0,
+      power: e.card.power,
+      toughness: e.card.toughness,
+      zone: 'battlefield' as const,
+    };
+    void this.actions.send({ type: 'create_card', card }, `create token ${e.card.name}`).catch((err) => this.diag('warn', 'cube token failed', String(err)));
+  }
+
+  private pushCube(): void {
+    if (!this.cube) return;
+    const cat = this.cube.catalog;
+    const cards = (cat?.entries ?? []).map((e) => ({ key: e.card.key, name: e.card.name, typeLine: e.card.typeLine, image: e.card.image, considering: e.card.considering }));
+    this.bridge.send({ type: 'cube-status', status: this.cube.status(), cards });
+  }
+
+  /** Repaint visible carriers after the cube was switched on/off or refreshed. */
+  private reskinCube(): void {
+    const cat = this.cube?.catalog;
+    if (!cat) return;
+    const ids = this.zones
+      .all()
+      .filter((c) => c.zone !== 'library' && cat.lookup(c.card))
+      .map((c) => c.id);
+    if (ids.length) this.reskinExisting(ids);
   }
 
   // ------------------------------------------------------------------ sweep
@@ -949,6 +1015,7 @@ export class Engine {
     this.pushState();
     this.pushOffer();
     this.bridge.send({ type: 'peers', peers: Object.values(this.peers) });
+    this.pushCube();
     this.scheduleZones();
   }
 
@@ -1002,6 +1069,14 @@ function safeLocalStorage(win: Window): Storage | null {
     return win.localStorage;
   } catch {
     return null;
+  }
+}
+
+function newCardId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
   }
 }
 
