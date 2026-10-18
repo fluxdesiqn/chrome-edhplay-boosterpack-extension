@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Heroes of Kamigawa for EDHPlay",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Open sealed Kamigawa boosters at the table and play custom CubeForge cube cards on edhplay.com.",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],
